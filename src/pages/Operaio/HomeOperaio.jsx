@@ -1,30 +1,64 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react'; //hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
+import { useNavigate } from 'react-router-dom'; //hook per navigare fra le pagine 
+import '../../style/HomeOperaio.css'; 
 
-// Definisce variabili utente , ne recupera alcune dal browser
+
 function HomeOperaio() {
-  const nomeUtente = localStorage.getItem('nomeUtente');
+  // Variabili di stato
+  const nomeUtente = localStorage.getItem('nomeUtente'); //prese dal browser
   const idUtente = localStorage.getItem('idUtente');
+  const [oraIngresso, setOraIngresso] = useState(null);
+  const [tempoLavorato, setTempoLavorato] = useState('00:00');
   const [oreLavoro, setOreLavoro] = useState('0');
   const [capiBestiame, setCapiBestiame] = useState([]);
   const [mansioniAccessorie, setMansioniAccessorie] = useState([]);
   const [segnalazione, setSegnalazione] = useState('');
+  const [nomeGestore, setNomeGestore] = useState(null);
 
   const navigate = useNavigate();
 
-  // Prende dati utente dal server , aggiorna ogni 5 secondi
+  // Carica dal server i dati utente (aggiorna ogni 5 secondi)
   useEffect(() => {
     fetchData();
+    fetchNomeGestore();
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, [idUtente]);
+  
+  // Calcola le ore lavorate in giornata per aggiornare il counter (aggiorna ogni minuto)
+  useEffect(() => {
+    if (!oraIngresso) return; // se non c'e oraIngresso returna nulla .
+      const aggiornaTempoLavorato = () => {
+      const inizio = new Date(oraIngresso);
 
-  // -------- comunica con HOME-OPERAIO nel server ----------
+      if (isNaN(inizio.getTime())) return; // se orario non e' valido returna nulla .
+
+      const adesso = new Date();
+      const diffSec = Math.floor((adesso - inizio) / 1000); //calcola secondi passati
+      const ore = String(Math.floor(diffSec / 3600)).padStart(2, '0'); //conversione ore 
+      const min = String(Math.floor((diffSec % 3600) / 60)).padStart(2, '0'); //conversione minuti
+
+      setTempoLavorato(`${ore}:${min}`);
+    };
+
+    aggiornaTempoLavorato(); // calcola subito il tempo lavorato 
+    const timer = setInterval(aggiornaTempoLavorato, 60000); // aggiorna ogni minuto 
+
+    return () => clearInterval(timer);
+  }, [oraIngresso]);
+
+  
+
+
+
+  // ----------------- LOGICA DI HOMEOPERAIO -----------------
+
+  //Carica dati relativi l'operaio (ore lavorate , quotidiane , mansioni accessorie)
   const fetchData = async () => {
     try {
       const res = await fetch(`http://localhost:3001/home-operaio/${idUtente}`);
-      const data = await res.json();
-      setOreLavoro(data.oreLavoro);
+      const data = await res.json(); //carica dati da json
+      setOraIngresso(data.oraIngresso);
       setCapiBestiame(data.capiBestiame);
       setMansioniAccessorie(data.mansioniAccessorie);
     } catch (err) {
@@ -32,7 +66,19 @@ function HomeOperaio() {
     }
   };
 
-  // LISTA CAPI DI BESTIAME : Aggiorna la tabella delle quotidiane nel DB passando da server
+  // Carica nome del gestore dell'operaio 
+  const fetchNomeGestore = async () => {
+    try {
+      const res = await fetch(`http://localhost:3001/home-operaio/gestore/${idUtente}`);
+      if (!res.ok) throw new Error("Errore nella richiesta");
+      const data = await res.json(); //carica dati da json
+      setNomeGestore(data.NomeGestore);
+    } catch (error) {
+      console.error("Errore nel recupero del nome del gestore:", error);
+    }
+  };
+
+  // TABELLA QUOTIDIANE : Quando si preme su una quotidiana si aggiorna il DB e si aggiorna la tabella quotidiane 
   const toggleMansione = async (idQuotidiana, campo, valore) => {
     try {
       await fetch('http://localhost:3001/update-quotidiana', {
@@ -43,13 +89,13 @@ function HomeOperaio() {
           campo,
           valore: valore ? 0 : 1 }) 
       });
-      fetchData(); // ricarica da server dati per rifletteri in IU 
+      fetchData(); // ricarica da server i dati per rifletteri in IU 
     } catch (err) {
       console.error('Errore aggiornamento mansione', err);
     }
   };
 
-  // LISTA MANSIONI ACCESSORIE : Aggiorna la tabella delle mansioni accessorie nel DB passando da server 
+  // TABELLA MANSIONI ACCESSORIE : Quando si segna come completata una mansione si aggiorna il db e si aggiorna lo stato "Eseguita"
   const spuntaMansioneAccessoria = async (idComunicazione, statoAttuale) => {
     const nuovoStato = statoAttuale === 1 ? 0 : 1;
     try {
@@ -59,15 +105,17 @@ function HomeOperaio() {
         body: JSON.stringify({ idComunicazione, nuovoStato })
       });
   
-      fetchData(); // ricarica da server dati per figletterli su UI 
+      fetchData(); // ricarica da server dati per rifletterli su UI 
     } catch (err) {
       console.error('Errore aggiornamento comunicazione', err);
     }
   };
   
-// INVIA SEGNALAZIONE : Inserisce in DB una segnaalzione , passando da server 
+// INVIA UNA SEGNALAZIONE : Inserisce in DB una segnaalzione , passando da server 
   const inviaSegnalazione = async () => {
-    if (!segnalazione.trim()) return; // controllo per textarea vuota o solo spazi 
+    if (!segnalazione.trim()) { //controlla se la text area e' vuota
+    alert("Non è stato scritto nessun messaggio da inviare.");
+    return;}
     try {
       const res = await fetch('http://localhost:3001/invia-segnalazione', {
         method: 'POST',
@@ -75,7 +123,7 @@ function HomeOperaio() {
         body: JSON.stringify({ idMittente: idUtente, testo: segnalazione })
       });
   
-      const data = await res.json();
+      const data = await res.json(); // carica dati da json
       if (data.success) {
         alert('Segnalazione inviata!');
         setSegnalazione('');
@@ -87,45 +135,58 @@ function HomeOperaio() {
     }
   };
   
-// INTERFACCIA UTENTE
+
+
+
+
+
+
+
+// -------------------- INTERFACCIA UTENTE ------------------------
   return (
-    <div style={{ padding: '20px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+    <div className="home-container">
+      {/* BARRA SUPERIORE */}
+      <div className="home-header"> 
         <span><strong>Utente:</strong> {nomeUtente}</span>
-        <span><strong>Ore lavorate oggi:</strong> {oreLavoro}</span>
+        <span><strong>Ore lavorate oggi:</strong> {tempoLavorato}</span>
       </div>
 
+      {/* MANSIONI QUOTIDIANE*/}
       <h3>Capi di bestiame</h3>
-      <table border="1">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Pulizia</th>
-            <th>Mungitura1</th>
-            <th>Mungitura2</th>
-            <th>Alimentazione</th>
-          </tr>
-        </thead>
-        <tbody>
-          {capiBestiame.map(item => (
-            <tr key={item.ID}>
-              <td>{item.idAnimale}</td>
-              {['Pulizia', 'Mungitura1', 'Mungitura2', 'Alimentazione'].map(campo => (
-                <td
-                  key={campo}
-                  style={{ cursor: 'pointer', textAlign: 'center' }}
-                  onClick={() => toggleMansione(item.ID, campo, item[campo])} // Rende tabella "interattiva"
-                >
-                  {item[campo] === 1 ? '✓' : ''}
-                </td>
-              ))}
-            </tr>
+        <div className="tabella-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Pulizia</th>
+                <th>Mungitura1</th>
+                <th>Mungitura2</th>
+                <th>Alimentazione</th>
+              </tr>
+              </thead>
+            <tbody>
+              {capiBestiame.map(item => (
+                <tr key={item.ID}>
+                  <td className="no-hover">{item.idAnimale}</td>
+                  {['Pulizia', 'Mungitura1', 'Mungitura2', 'Alimentazione'].map(campo => (
+                    <td
+                      key={campo}
+                      style={{ cursor: 'pointer', textAlign: 'center' }}
+                      onClick={() => toggleMansione(item.ID, campo, item[campo])} // rende tabella "interattiva"
+                    >
+                      {item[campo] === 1 ? '✓' : ''}
+                    </td>
+                ))}
+              </tr>
           ))}
         </tbody>
       </table>
-
+      </div>
+      
+      {/* MANSIONI ACCESSORIE */}
       <h3>Mansioni Accessorie</h3>
-      <table border="1">
+      <div className="tabella-scroll">
+        <table>
         <thead>
           <tr>
             <th>Messaggio</th>
@@ -135,7 +196,7 @@ function HomeOperaio() {
         <tbody>
           {mansioniAccessorie.map(m => (
             <tr key={m.ID}>
-              <td>{m.Testo}</td>
+              <td className="no-hover">{m.Testo}</td>
               <td>
                 <input
                   type="checkbox"
@@ -147,9 +208,10 @@ function HomeOperaio() {
           ))}
         </tbody>
       </table>
+      </div>
 
-
-      <h3>Segnalazioni</h3>
+      {/* INVIA UNA SEGNALAZIONE*/}
+      <h3>Invia una segnalazione a : {nomeGestore && <span> {nomeGestore}</span>}</h3>
         <textarea
           rows="4"
           cols="50"
@@ -157,16 +219,18 @@ function HomeOperaio() {
           onChange={e => setSegnalazione(e.target.value)}
           placeholder="Scrivi qui la tua segnalazione..."
         />
-        <br />
-        <button onClick={inviaSegnalazione}>Invia</button>
+              <div className="segnalazione-actions">
+              <button className="invia-button" onClick={inviaSegnalazione}>Invia Segnalazione</button>
+      </div>
 
-        <br />
-        <button style={{ backgroundColor: 'red', color: 'white' }} onClick={() => navigate('/TimbraUscita')}>
+      <div className="termina-turno-container">
+        <button className="termina-turno-button" onClick={() => navigate('/TimbraUscita')}>
           Termina Turno
         </button>
+      </div>
     </div>
     
   );
 }
 
-export default HomeOperaio; //rende esportabile la pagina
+export default HomeOperaio; 
