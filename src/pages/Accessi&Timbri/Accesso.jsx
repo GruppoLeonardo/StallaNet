@@ -1,41 +1,36 @@
-import React, { useState } from 'react'; // useState = gestire gli stati reattivi 
-import { useNavigate } from 'react-router-dom'; // hook di React Router , per redirect programmati
+import React, { useState } from 'react'; // useState = gestire il local state reattivo 
+import { useNavigate } from 'react-router-dom'; // hook di React Router per navigare tra le pagine
+import '../../style/Accesso.css';
 
-// Componente ACCESSO
 function Accesso() {
- 
-  // Definizione degli stati
+  // Variabili di stato
   const [nomeUtente, setNomeUtente] = useState('');
   const [password, setPassword] = useState('');
   const [errore, setErrore] = useState('');
 
-  // Per spostarsi tra pagine senza refreshare
-  const navigate = useNavigate();
+  const navigate = useNavigate();// Per spostarsi tra pagine senza refreshare.
 
-  // --------------------- GESTIONE DEL LOGIN ---------------------
+  // --------------------- LOGICA DI LOGIN ---------------------
   const handleLogin = async () => {
     try {
-      // manda a /login in server.js
+
       const res = await fetch('http://localhost:3001/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nomeUtente, password })
       });
+      const data = await res.json(); // risultati in json
 
-      //Contiene risultati
-      const data = await res.json();
-
-      //In caso di errori
-      if (!data.success) {
-        setErrore(data.error || 'Errore generico');
+      if (!data.success) {  
+        setErrore(data.error || 'Errore generico');  
         return;
       }
 
-      //Salva dati dell'utente nel browser
+      //Salva dati dell'utente in localstorage nel browser
       localStorage.setItem('idUtente', data.idUtente);
       localStorage.setItem('nomeUtente', nomeUtente);
 
-      //REINDIRIZZAMENTO IN BASE A RUOLO E CARTELLINO
+      //Reindirizzamento in base a ruolo e cartellino
       if (data.ruolo === 'direttore') {
         navigate('/HomeDirettore'); // se direttore
       } else if (data.stato === 'timbraEntrata') {
@@ -50,39 +45,44 @@ function Accesso() {
         navigate('/TimbraEntrata?giaTerminato=true'); // se turno finito
       }
 
-    } catch (err) {
+    } catch (err) { 
       console.error(err);
       setErrore('Errore di connessione');
     }
   };
 
 
-
-
-
-
-
-  // INTERFACCIA UTENTE 
+  //  --------------------- INTERFACCIA UTENTE ---------------------
   return (
-    <div className="accesso-container">
-      <h2>Accesso</h2>
-      <input
-        type="text"
-        placeholder="Nome utente"
-        value={nomeUtente}
-        onChange={e => setNomeUtente(e.target.value)}
-      />
-      <input
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={e => setPassword(e.target.value)} 
-      />
-      <button onClick={handleLogin}>Accedi</button> {/* manda dati ad handleLogin*/}
-      {errore && <p style={{ color: 'red' }}>{errore}</p>}
+    <div className="page-container">
+      <div className="header">
+        <h1>StallaNet</h1>
+        <p>Gestione moderna per la tua azienda agricola</p>
+      </div>
+  
+      <div className="accesso-container">
+        <h2>Accesso</h2>
+        <input
+          type="text"
+          placeholder="Nome utente"
+          value={nomeUtente}
+          onChange={e => setNomeUtente(e.target.value)}
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+        />
+        <button onClick={handleLogin}>Accedi</button>
+        {errore && <p>{errore}</p>}
+      </div>
+  
+      <br />
+      <div className="footer">© 2025 - StallaNet ERP - Tutti i diritti riservati</div>
     </div>
   );
+  
 }
 
-export default Accesso; // per farlo importare ad altre pag
-
+export default Accesso; 

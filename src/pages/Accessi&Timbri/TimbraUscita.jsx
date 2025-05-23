@@ -1,14 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react'; //hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
+import { useNavigate } from 'react-router-dom'; //hook per navigare fra le pagine 
+import '../../style/TimbraUscita.css'; 
+
 
 
 function TimbraUscita() {
   const nomeUtente = localStorage.getItem('nomeUtente');
   const idUtente = localStorage.getItem('idUtente'); // prende dati da browser
-  const [oreLavoro, setOreLavoro] = useState(0); // definisce costante per ore di lavoro svolte
+  const [oreLavoro, setOreLavoro] = useState(0); 
   const navigate = useNavigate();
 
-  //------------- ORE-LAVORO : Recupera ore di lavoro svolte dal server -------------
+  // Recupera ore di lavoro svolte 
   useEffect(() => {
     const fetchOre = async () => {
       try {
@@ -22,7 +24,7 @@ function TimbraUscita() {
     fetchOre();
   } , [idUtente] );
 
-  //------------- Comunica con TIMBRA-USCITA nel server ---------------
+  //-------------------- LOGICA DI TIMBRATURA ----------------------
   const terminaTurno = async () => {
     try {
       const res = await fetch('http://localhost:3001/timbra-uscita', {
@@ -31,6 +33,7 @@ function TimbraUscita() {
         body: JSON.stringify({ idUtente })
       });
       const data = await res.json();
+
       if (data.success) {
         navigate('/');
       } else {
@@ -42,11 +45,10 @@ function TimbraUscita() {
   };
 
 
-
-  // INTERFACCIA UTENTE 
+  // -------------------- INTERFACCIA UTENTE ---------------------
   return (
     <div className="uscita-container" style={{ padding: '20px' }}>
-      <h2>{nomeUtente}, hai svolto {oreLavoro} ore di lavoro.</h2>
+      <h2>{nomeUtente}, hai lavorato per {oreLavoro} ore.</h2>
       <p>Desideri terminare il turno di lavoro?</p>
       <button onClick={terminaTurno}>SI</button>
       <button onClick={() => navigate(-1)}>NO</button>
