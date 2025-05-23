@@ -1,34 +1,49 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';//hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
+import { useNavigate } from 'react-router-dom';//hook per navigare fra le pagine 
 import '../../style/GestorePagHome.css';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom'; //          
 
 
 
+//    da controlallare se utilizzato useLocation
 
 
-function GestorePagHome() { // COMPONENTE (funzione principale della pagina)
-  const idUtente = localStorage.getItem('idUtente');
-  const nomeUtente = localStorage.getItem('nomeUtente'); // prende dati dal browser
+
+function GestorePagHome() { 
+  //variabili di stato 
+  const idUtente = localStorage.getItem('idUtente'); // prende dati dal browser
+  const nomeUtente = localStorage.getItem('nomeUtente'); 
   const [oreLavoro, setOreLavoro] = useState(0);
   const [comunicazioni, setComunicazioni] = useState([]);
   const [contatti, setContatti] = useState([]);
   const [filtro, setFiltro] = useState('fornitore'); 
 
-  const navigate = useNavigate(); // per navigare senza refreshare pag 
+  const navigate = useNavigate(); // per navigare senza refreshare le pag 
 
-  // A ogni apertura pagina e ogni 5 secondi ricarica dati da server
+  //Carica dati per ottenere le ore lavorate da mostrare in UI.
+  useEffect(() => { 
+    const fetchEImposta = () => { //eseguito subito per caricare dati in IU 
+      fetchData();
+    };
+
+    fetchEImposta(); // esegui subito al caricamento pagina 
+    const intervalloMinuti = setInterval(fetchEImposta, 60000); // aggiorna ogni minuto
+    return () => clearInterval(intervalloMinuti);
+  }, []);
+
+  //Carica i dati ogni volta che si cambia filtro ( Fornitori/Sanitari )
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval); // quando chiudi pag si interrompe ricarica 
-  }, [filtro]);
+    fetchData(); 
+  }, [filtro]);// ogni volta che cambia filtro
 
-  // Prende da server i dati da mostrare
+
+
+//-------------------- LOGICA DI GESTOREPAGHOME ----------------------
+  // Carica da server i dati da mostrare (ore di lavoro svolte , comunicazioni , partner)
   const fetchData = async () => {
     try {
       const res = await fetch(`http://localhost:3001/home-gestore/${idUtente}?ruoloPartner=${filtro}`);
-      const data = await res.json(); // json -> oggetto data 
+      const data = await res.json(); // carica dati da json
       setOreLavoro(data.oreLavoro);
       setComunicazioni(data.comunicazioni);
       setContatti(data.contatti);
@@ -40,7 +55,6 @@ function GestorePagHome() { // COMPONENTE (funzione principale della pagina)
   // Aggiorne le Comunicazioni (cambia le spunte in tabella)
   const aggiornaLettura = async (idComunicazione, statoAttuale) => {
     const nuovoStato = statoAttuale === 1 ? 0 : 1; // invertirore 
-
     try {
       await fetch('http://localhost:3001/aggiorna-lettura', {
         method: 'POST',
@@ -54,18 +68,7 @@ function GestorePagHome() { // COMPONENTE (funzione principale della pagina)
   };
 
 
-
-
-
-
-
-
-
-
-
-
 // ------------- INTERFACCIA UTENTE -------------
-
   return (
     <div className="gestore-container">
 
@@ -92,6 +95,7 @@ function GestorePagHome() { // COMPONENTE (funzione principale della pagina)
 
       {/* COMUNICAZIONI */}
       <h3>Comunicazioni</h3>
+      <div class="tabella-scroll">
       <table>
         <thead>
           <tr>
@@ -110,6 +114,7 @@ function GestorePagHome() { // COMPONENTE (funzione principale della pagina)
           ))}
         </tbody>
       </table>
+      </div>
 
       {/* LISTA CONTATTI */}
       <h3>Lista Contatti</h3>
@@ -117,6 +122,7 @@ function GestorePagHome() { // COMPONENTE (funzione principale della pagina)
         <button onClick={() => setFiltro('fornitore')} className={filtro === 'fornitore' ? 'attivo' : ''}> Fornitori </button>
         <button onClick={() => setFiltro('veterinario')} className={filtro === 'veterinario' ? 'attivo' : ''}> Sanitari </button>
       </div>
+      <div class="tabella-scroll">
       <table>
         <thead>
           <tr>
@@ -132,11 +138,19 @@ function GestorePagHome() { // COMPONENTE (funzione principale della pagina)
               <td>{c.Nominativo}</td>
               <td>{c.Descrizione}</td>
               <td>{c.Telefono}</td>
-              <td><button>Invia Mail</button></td>
+              <td>
+                <a
+                  href={`mailto:${c.Email}?subject=MAIL LAVORATIVA&body=Salve ${c.Nominativo},`} // precompila l'email da mandare
+                  style={{ textDecoration: 'none' }}
+                >
+                <button className="emoji-email">📩</button>
+                </a>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

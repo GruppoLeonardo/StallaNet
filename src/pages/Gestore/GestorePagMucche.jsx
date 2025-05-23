@@ -1,72 +1,100 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useLocation } from 'react-router-dom'; // per sapere in quale delle 3 pagine ci si trova 
+import React, { useEffect, useState , useRef} from 'react';//hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
+import { useNavigate } from 'react-router-dom';//hook per navigare fra le pagine 
+import { useLocation } from 'react-router-dom'; // Controllare 
 import '../../style/GestorePagMucche.css';
 
 
-
-//COMPONENTE REACT 
 function GestorePagMucche() { 
+  //Dati Utente
   const idUtente = localStorage.getItem('idUtente');
   const nomeUtente = localStorage.getItem('nomeUtente'); // prende da browser
+  //Stati principali della pagina
   const [mucche, setMucche] = useState([]);
   const [oreLavoro, setOreLavoro] = useState(0);
   const [idStalla, setIdStalla] = useState(null);
-  const [popupTipo, setPopupTipo] = useState(null); // stato che controlla quale pop-up e' attualmente aperto 
-  const [popupData, setPopupData] = useState({});   // stato che contiene i dati temporanei che si stanno scrivendo nel pop-up
+  const [posizioneStalla, setPosizioneStalla] = useState('');
+  //POPUP
+  const [popupTipo, setPopupTipo] = useState(null); // controlla quale pop-up e' aperto ora
+  const [popupData, setPopupData] = useState({});   //  contiene dati che si stanno scrivendo 
+  //Gestione operai
   const [operai, setOperai] = useState([]);
+  //Barra di ricerca
+  const [cercaTesto, setCercaTesto] = useState(''); 
+  const [parolaEvidenziata, setParolaEvidenziata] = useState('');
+  const righeRef = useRef({}); //Ref React
 
-  const navigate = useNavigate(); // fa navigare tra le pagine 
+  const navigate = useNavigate(); 
 
-  // Carica dati appena apri pag , refresha ogni 5 secondi 
+  // Parte al caricamento della pagina , refresha ogni 5 secondi 
   useEffect(() => {
-    fetchMucche();
-    fetchOreLavorate();
+    fetchMucche(); //recupera mucche in stalla
+    fetchOreLavorate(); //recupera ore lavorate da gestore
     const interval = setInterval(() => {fetchMucche();}, 5000);
-    return () => clearInterval(interval); // Quando esci , ferma intervallo
+    return () => clearInterval(interval); // pulizia all'uscita
   },[]);
+
+  //Parte al caricamento della pagina , refresha ogni 60 secondi
+  useEffect(() => {
+  const interval = setInterval(() => {
+    fetchOreLavorate(); // aggiorna counter ore lavorate
+  }, 60000);
+  return () => clearInterval(interval); // pulizia all'uscita
+  }, []);
   
-  // CARICA TUTTE MUCCHE DELLA STALLA SOTTO CONTROLLO DAL GESTORE
+  //-------------------- LOGICA DI GESTOREPAGMUCCHE.JSX -----------------------
+  // Carica tutte le mucche in questa stalla
   const fetchMucche = async () => {
     try {
       const res = await fetch(`http://localhost:3001/mucche-gestore/${idUtente}`);
-      const data = await res.json();
+      const data = await res.json(); //carica da json
+      if (!data || !data.idStalla) {
+        throw new Error("Dati mancanti dal backend");
+      }
+      //salva i dati negli stati 
       setMucche(data.mucche);
       setIdStalla(data.idStalla);
+      setPosizioneStalla(data.posizioneStalla); 
     } catch (err) {
-      console.error('Errore caricamento mucche', err);
+      console.error('Errore caricamento mucche:', err);
+      alert('Errore nel caricamento delle mucche.');
     }
   };
 
-  // CARICA TUTTI OPERAI CHE LAVORANO NELLA STALLA SOTTO CONTROLLO DEL GESTORE
+  // MODIFICA : 23 mag , qui ho tolto un controllo di risposta server
+  // Carica tutti gli operai che lavorano in questa stalla 
   const fetchOperai = async (idStalla) => {
     try {
       const res = await fetch(`http://localhost:3001/operai-stalla/${idStalla}`);
-      const data = await res.json();
-      setOperai(data.operai);
+      const data = await res.json(); 
+      if (!data.operai || !Array.isArray(data.operai)) { // controlla che ci sia l'array operai 
+        throw new Error("Formato JSON non valido: manca 'operai'");
+      }
+      setOperai(data.operai); //salva lista operai
     } catch (err) {
-      console.error('Errore caricamento operai', err);
+      console.error('Errore fetchOperai:', err);
+      alert('Errore nel caricamento degli operai. Controlla la console.');
     }
   };
 
-  // CALCOLO ORE LAVORATE OGGI
+ // MODIFICA: IL 20 Mag
+  // Calcola ore lavorate oggi dal gestore
   const fetchOreLavorate = async () => {
-    try {
-      const res = await fetch(`http://localhost:3001/home-gestore/${idUtente}`);
-      const data = await res.json();
-      setOreLavoro(data.oreLavoro);
-    } catch (err) {
-      console.error('Errore caricamento ore lavorate', err);
-    }
-  };
+  try {
+    const res = await fetch(`http://localhost:3001/ore-lavoro-gestore/${idUtente}`);
+    const data = await res.json();
+    setOreLavoro(data.oreLavoro);
+  } catch (err) {
+    console.error('Errore caricamento ore lavorate', err);
+  }
+};
   
   // APRE I POP-UP
-  const apriPopup = (tipo) => {
-    setPopupTipo(tipo); // quale fra i 3
-    setPopupData({}); // pulisce dati vecchi nei form
+  const apriPopup = async (tipo) => {
     if (idStalla) {
-      fetchOperai(idStalla);
+      await fetchOperai(idStalla); // aspetta che operai sia disponibile prima di aprire popup
     }
+    setPopupTipo(tipo);
+    setPopupData({});
   };
 
   // CHIUDE I POP-UP
@@ -77,59 +105,88 @@ function GestorePagMucche() {
 
   // POP-UP : AGGIUNGI MUCCA
   const aggiungiMucca = async () => {
+    if (!popupData.idOperaio) { //controlla che nuova mucca venga assegnata ad un operaio
+      alert("ATTENZIONE : Per inserire una nuova mucca nel database bisogna assegnarla ad un Operaio.");
+      return;
+    }
     try {
       await fetch('http://localhost:3001/aggiungi-mucca', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...popupData, idStalla }) // invia i dati inseriti nel form
+        body: JSON.stringify({ ...popupData, idStalla })
       });
-      fetchMucche(); // ricarica lista mucche
+      fetchMucche(); //aggiorna lista mucche 
       chiudiPopup();
     } catch (err) {
       console.error('Errore aggiunta mucca', err);
     }
   };
-
+  
   // POP-UP : MODIFICA DATI MUCCA
   const modificaMucca = async () => {
+    if (!popupData.idMucca) {  //Controlla se è stata selezionata una mucca
+      alert("ATTENZIONE : Devi selezionare una mucca da modificare per poter continuare.");
+      return;
+    }
+    // Controlla se almeno uno degli altri campi è stato modificato
+    const nessunCambio =
+      (!popupData.Nota || popupData.Nota.trim() === '') &&
+      (!popupData.Vaccinazioni || popupData.Vaccinazioni.trim() === '') &&
+      (!popupData.idOperaio || popupData.idOperaio === '');
+    if (nessunCambio) {
+      alert("ATTENZIONE : Non hai selezionato alcun campo da modificare .");
+      return;
+    }
     try {
       await fetch('http://localhost:3001/modifica-mucca', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(popupData) // invia i dati inseriti nel form
+        body: JSON.stringify(popupData)
       });
-      fetchMucche(); // ricarica lista mucche
+      fetchMucche(); // Ricarica lista mucche
       chiudiPopup();
     } catch (err) {
       console.error('Errore modifica mucca', err);
     }
-  };
+  };  
 
   //POP-UP : ELIMINA MUCCA
   const eliminaMucca = async () => {
+    if (!popupData.idMucca) { //controlla che sia stata selezionata una mucca 
+      alert("ATTENZIONE: Non hai selezionato alcuna mucca da eliminare.");
+      return;
+    }
     try {
       await fetch('http://localhost:3001/elimina-mucca', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idMucca: popupData.idMucca }) // invia i dati inseriti nel form
+        body: JSON.stringify({ idMucca: popupData.idMucca })
       });
-      fetchMucche(); // ricarica lista mucche
+      fetchMucche();// Ricarica lista mucche
       chiudiPopup();
     } catch (err) {
       console.error('Errore eliminazione mucca', err);
     }
   };
- 
+
+  //Copia array mucche , ordina tabella Mucche in UI in base agli operai .
+  const muccheOrdinate = [...mucche].sort((a, b) => {
+    const nomeA = a.NomeOperaio || '';
+    const nomeB = b.NomeOperaio || '';
+    return nomeA.localeCompare(nomeB);
+  });
+
+  // evidenzia parola cercata col finder
+  const evidenzia = (testo) => {
+    if (!parolaEvidenziata) return testo;
+    const regex = new RegExp(`(${parolaEvidenziata})`, 'gi');
+    return testo.replace(regex, '<mark>$1</mark>');
+  };
+  
+  righeRef.current.found = null; //pulisce riferimento alla precedente riga trovata 
 
 
-
-
-
-
-
-
-
-  // ---------------- INTERFACCIA UTENTE -----------------
+  // --------------------- INTERFACCIA UTENTE ----------------------
   return (
     //BARRA SUPERIORE
     <div className="gestore-container">
@@ -139,9 +196,7 @@ function GestorePagMucche() {
           <span><strong>Gestore:</strong> {nomeUtente}</span>
         </div>
         <div className="gestore-destra">
-          <span> 
-            <strong> Ore lavorate oggi: </strong> {oreLavoro}
-          </span>
+          <span><strong> Ore lavorate oggi: </strong> {oreLavoro}</span>
           <button className="gestore-termina-turno" onClick={() => navigate('/TimbraUscita')}> Termina Turno </button>
         </div>
       </div>
@@ -154,128 +209,189 @@ function GestorePagMucche() {
       </div>
 
       {/* TABELLA MUCCHE */}
-      <h3>Mucche presenti in stalla: {idStalla}</h3>
+    <div className="intestazione-tabella">
+      <h3>Mucche presenti nella stalla a: {posizioneStalla}</h3>
+      <div className="campo-ricerca">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault(); // previene il refresh della pagina
+            setParolaEvidenziata(cercaTesto);
+            setTimeout(() => {
+              if (righeRef.current.found) {
+                righeRef.current.found.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                righeRef.current.found = null;
+              }
+            }, 100);
+          }}className="campo-ricerca">
+          <input
+            type="text"
+            placeholder="Cerca in elenco"
+            value={cercaTesto}
+            onChange={(e) => setCercaTesto(e.target.value)}
+          />
+          <button type="submit">Cerca</button>
+        </form>
+      </div>
+    </div>
+    
+    <div class="tabella-scroll">
       <table>
         <thead>
           <tr>
             <th>ID Bestiame</th>
+            <th>Operaio</th>
             <th>Note</th>
             <th>Vaccinazioni</th>
           </tr>
         </thead>
         <tbody>
-          {mucche.map(m => (
-            <tr key={m.ID}>
-              <td>{m.ID}</td>
-              <td>{m.Nota}</td>
-              <td>{m.Vaccinazioni}</td>
-            </tr>
-          ))}
+          {muccheOrdinate.map((m) => {
+            const match =
+              m.ID.toString().includes(parolaEvidenziata) ||
+              (m.NomeOperaio || '').toLowerCase().includes(parolaEvidenziata.toLowerCase()) ||
+              (m.Nota || '').toLowerCase().includes(parolaEvidenziata.toLowerCase()) ||
+              (m.Vaccinazioni || '').toLowerCase().includes(parolaEvidenziata.toLowerCase());
+
+            return(
+              <tr
+                key={m.ID}
+                className={match && parolaEvidenziata ? 'highlight' : ''}
+                ref={el => 
+                  {if (match && parolaEvidenziata && !righeRef.current.found) {righeRef.current.found = el;}}
+                }
+              >
+                <td dangerouslySetInnerHTML={{ __html: evidenzia(m.ID.toString()) }} />
+                <td dangerouslySetInnerHTML={{ __html: evidenzia(m.NomeOperaio || '—') }} />
+                <td dangerouslySetInnerHTML={{ __html: evidenzia(m.Nota || '') }} />
+                <td dangerouslySetInnerHTML={{ __html: evidenzia(m.Vaccinazioni || '') }} />
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+    </div>
 
-      {/* PULSANTI MODIFICHE */}
-      <h3>Modifiche</h3>
-      <div className="gestore-modifiche">
-        <button onClick={() => apriPopup('aggiungi')}>Aggiungi Mucca</button>
-        <button onClick={() => apriPopup('modifica')}>Modifica Dati Mucca</button>
-        <button onClick={() => apriPopup('elimina')}>Elimina Mucca</button>
-      </div>
 
-      {/* POPUP */}
-      {popupTipo && (
-        <div className="popup-overlay">
-          <div className="popup">
+    {/* PULSANTI MODIFICHE */}
+    <h3>Modifiche</h3>
+    <div className="gestore-modifiche">
+      <button onClick={() => apriPopup('aggiungi')}>Aggiungi Mucca</button>
+      <button onClick={() => apriPopup('modifica')}>Modifica Dati Mucca</button>
+      <button onClick={() => apriPopup('elimina')}>Elimina Mucca</button>
+    </div>
 
-            {/* AGGIUNGI MUCCA */}
-            {popupTipo === 'aggiungi' && (
-              <>
-                <h3>Aggiungi nuova mucca alla stalla</h3>
-                <input
-                  type="text"
-                  placeholder="Nota"
-                  onChange={e => setPopupData({ ...popupData, Nota: e.target.value })}
-                />
-                <input
-                  type="text"
-                  placeholder="Vaccinazioni"
-                  onChange={e => setPopupData({ ...popupData, Vaccinazioni: e.target.value })}
-                />
-                <select
-                  onChange={e => setPopupData({ ...popupData, idOperaio: e.target.value })}
-                >
-                  <option value="">-- Seleziona Operaio --</option>
-                  {operai.map(o => (
-                    <option key={o.ID} value={o.ID}>
-                      {o.NomeUtente} ({o.numMucche} mucche)
-                    </option>
-                  ))}
-                </select>
-                <button onClick={aggiungiMucca}>Aggiungi Mucca</button>
-                <button onClick={chiudiPopup}>Annulla</button>
-              </>
-            )}
+    {/* POPUP */}
+    {popupTipo && (
+      <div className="popup-overlay">
+        <div className="popup">
+          {/* AGGIUNGI MUCCA */}
+          {popupTipo === 'aggiungi' && (
+            <>
+              <h3>Aggiungi nuova mucca alla stalla</h3>
+              <input
+                type="text"
+                placeholder="Nota"
+                onChange={e => setPopupData({ ...popupData, Nota: e.target.value })}
+              />
+              <input
+                type="text"
+                placeholder="Vaccinazioni"
+                onChange={e => setPopupData({ ...popupData, Vaccinazioni: e.target.value })}
+              />
+              <select
+                onChange={e => setPopupData({ ...popupData, idOperaio: e.target.value })}
+              >
+                <option value="">-- Operaio a cui affidarla --</option>
+                {operai.map(o => (
+                  <option key={o.ID} value={o.ID}>
+                    {o.NomeUtente} ({o.numMucche} mucche)
+                  </option>
+                ))}
+              </select>
+              <button onClick={aggiungiMucca}>Aggiungi Mucca</button>
+              <button onClick={chiudiPopup}>Annulla</button>
+            </>
+          )}
 
-             {/* MODIFICA DATI MUCCA */}
-            {popupTipo === 'modifica' && (
-              <>
-                <h3>Modifica Dati Mucca</h3>
-                <select
-                  onChange={e => setPopupData({ ...popupData, idMucca: e.target.value })}
-                >
-                  <option value="">-- Seleziona Mucca --</option>
-                  {mucche.map(m => (
-                    <option key={m.ID} value={m.ID}>
-                      ID: {m.ID}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  placeholder="Nuova Nota"
-                  onChange={e => setPopupData({ ...popupData, Nota: e.target.value })}
-                />
-                <input
-                  type="text"
-                  placeholder="Nuove Vaccinazioni"
-                  onChange={e => setPopupData({ ...popupData, Vaccinazioni: e.target.value })}
-                />
-                <select
-                  onChange={e => setPopupData({ ...popupData, idOperaio: e.target.value })}
-                >
-                  <option value="">-- Affida a Operaio --</option>
-                  {operai.map(o => (
-                    <option key={o.ID} value={o.ID}>
-                      {o.NomeUtente} ({o.numMucche} mucche)
-                    </option>
-                  ))}
-                </select>
+          {/* MODIFICA DATI MUCCA */}
+          {popupTipo === 'modifica' && (
+            < >
+              <h3>Modifica Dati Mucca</h3>
+              <select
+                onChange={e => {
+                  const id = e.target.value;
+                  const mucca = mucche.find(m => m.ID == id);
+                  if (mucca) {
+                    setPopupData(prev => ({
+                      ...prev,
+                      idMucca: mucca.ID,
+                      Nota: mucca.Nota || '',
+                      Vaccinazioni: mucca.Vaccinazioni || '',
+                      idOperaio: mucca.idOperaio ? String(mucca.idOperaio) : ''
+                    }));
+                  }
+                }}
+              >
+                <option value="">-- Seleziona Mucca --</option>
+                {mucche.map(m => (
+                  <option key={m.ID} value={m.ID}>
+                    ID: {m.ID}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                type="text"
+                placeholder="Nuova Nota"
+                value={popupData.Nota || ''}
+                onChange={e => setPopupData({ ...popupData, Nota: e.target.value })}
+              />
+
+              <input
+                type="text"
+                placeholder="Nuove Vaccinazioni"
+                value={popupData.Vaccinazioni || ''}
+                onChange={e => setPopupData({ ...popupData, Vaccinazioni: e.target.value })}
+              />
+
+              <select
+                value={popupData.idOperaio || ''}
+                onChange={e => setPopupData({ ...popupData, idOperaio: e.target.value })}
+              >
+              <option value="">-- Affida a Operaio --</option>
+              {operai.map(o => (
+                <option key={o.ID} value={o.ID.toString()}>
+                  {o.NomeUtente} ({o.numMucche} mucche)
+                </option>
+              ))}
+              </select>
                 <button onClick={modificaMucca}>Esegui Modifica</button>
                 <button onClick={chiudiPopup}>Annulla</button>
               </>
-            )}
+          )}
 
-             {/* ELIMINA MUCCA */}
-            {popupTipo === 'elimina' && (
-              <>
-                <h3>Elimina Mucca</h3>
-                <select
-                  onChange={e => setPopupData({ ...popupData, idMucca: e.target.value })}
-                >
-                  <option value="">-- Seleziona Mucca da Eliminare --</option>
-                  {mucche.map(m => (
-                    <option key={m.ID} value={m.ID}>
-                      ID: {m.ID}
-                    </option>
-                  ))}
-                </select>
-                <button onClick={eliminaMucca}>Conferma Eliminazione</button>
-                <button onClick={chiudiPopup}>Annulla</button>
-              </>
-            )}
-          </div>
+          {/* ELIMINA MUCCA */}
+          {popupTipo === 'elimina' && (
+            <>
+              <h3>Elimina Mucca</h3>
+              <select
+                onChange={e => setPopupData({ ...popupData, idMucca: e.target.value })}
+              >
+                <option value="">-- Seleziona Mucca da Eliminare --</option>
+                {mucche.map(m => (
+                  <option key={m.ID} value={m.ID}>
+                    ID: {m.ID}
+                  </option>
+                ))}
+              </select>
+            
+              <button onClick={eliminaMucca}>Conferma Eliminazione</button>
+              <button onClick={chiudiPopup}>Annulla</button>
+            </>
+          )}
         </div>
-      )}
+      </div>
+    )}
     </div>
   );
 }
