@@ -1,18 +1,19 @@
 import React, { useEffect, useState } from 'react';//hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
 import { useNavigate } from 'react-router-dom';//hook per navigare fra le pagine 
 import '../../style/GestorePagHome.css';
-import { useLocation } from 'react-router-dom'; //          
+import { SERVER_URL } from '../../config';
+import { calcolaTempoTrascorso } from '../../utils/utilsFrontend';
 
 
 
-//    da controlallare se utilizzato useLocation
 
-
-
+       
 function GestorePagHome() { 
-  //variabili di stato 
+  //Stati utente 
   const idUtente = localStorage.getItem('idUtente'); // prende dati dal browser
   const nomeUtente = localStorage.getItem('nomeUtente'); 
+  
+  const [oraIngresso, setOraIngresso] = useState(null);
   const [oreLavoro, setOreLavoro] = useState(0);
   const [comunicazioni, setComunicazioni] = useState([]);
   const [contatti, setContatti] = useState([]);
@@ -20,43 +21,58 @@ function GestorePagHome() {
 
   const navigate = useNavigate(); // per navigare senza refreshare le pag 
 
-  //Carica dati per ottenere le ore lavorate da mostrare in UI.
-  useEffect(() => { 
-    const fetchEImposta = () => { //eseguito subito per caricare dati in IU 
+  useEffect(() => {
+    const aggiornaDati = () => {
       fetchData();
     };
 
-    fetchEImposta(); // esegui subito al caricamento pagina 
-    const intervalloMinuti = setInterval(fetchEImposta, 60000); // aggiorna ogni minuto
-    return () => clearInterval(intervalloMinuti);
-  }, []);
+    aggiornaDati(); // subito
+    const intervallo = setInterval(aggiornaDati, 5000); // ogni 5 secondi
 
-  //Carica i dati ogni volta che si cambia filtro ( Fornitori/Sanitari )
+    return () => clearInterval(intervallo);
+  }, [filtro]);
+
+
+
   useEffect(() => {
-    fetchData(); 
-  }, [filtro]);// ogni volta che cambia filtro
+    if (!oraIngresso) return;
+
+    const aggiornaOre = () => {
+      const tempo = calcolaTempoTrascorso(oraIngresso);
+      setOreLavoro(tempo);
+    };
+
+    aggiornaOre(); // subito
+    const timer = setInterval(aggiornaOre, 60000); // ogni minuto
+
+    return () => clearInterval(timer);
+  }, [oraIngresso]);
+
+
 
 
 
 //-------------------- LOGICA DI GESTOREPAGHOME ----------------------
   // Carica da server i dati da mostrare (ore di lavoro svolte , comunicazioni , partner)
-  const fetchData = async () => {
-    try {
-      const res = await fetch(`http://localhost:3001/home-gestore/${idUtente}?ruoloPartner=${filtro}`);
-      const data = await res.json(); // carica dati da json
-      setOreLavoro(data.oreLavoro);
-      setComunicazioni(data.comunicazioni);
-      setContatti(data.contatti);
-    } catch (err) {
-      console.error('Errore nel caricamento dati gestore', err);
-    }
-  };
+ const fetchData = async () => {
+  try {
+    const res = await fetch(`${SERVER_URL}/gestore-pag-home/${idUtente}?ruoloPartner=${filtro}`);
+    const data = await res.json();
+
+    setOraIngresso(data.oraIngresso || null); // ← nuovo
+    setComunicazioni(data.comunicazioni);
+    setContatti(data.contatti);
+  } catch (err) {
+    console.error('Errore nel caricamento dati gestore', err);
+  }
+};
+
 
   // Aggiorne le Comunicazioni (cambia le spunte in tabella)
   const aggiornaLettura = async (idComunicazione, statoAttuale) => {
     const nuovoStato = statoAttuale === 1 ? 0 : 1; // invertirore 
     try {
-      await fetch('http://localhost:3001/aggiorna-lettura', {
+      await fetch(`${SERVER_URL}/gestore-pag-home/aggiorna-lettura`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idComunicazione, nuovoStato })

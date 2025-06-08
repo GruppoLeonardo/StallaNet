@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';//hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
 import { useNavigate } from 'react-router-dom';//hook per navigare fra le pagine 
 import '../../style/GestorePagOperai.css';
+import { SERVER_URL } from '../../config';
+import { calcolaTempoTrascorso } from '../../utils/utilsFrontend';
+
+
 
 function GestorePagOperai() {
   //costanti generali
@@ -8,7 +12,9 @@ function GestorePagOperai() {
   const nomeUtente = localStorage.getItem('nomeUtente');
   const [operai, setOperai] = useState([]);
   const [idStalla, setIdStalla] = useState(null);
-  const [oreLavoro, setOreLavoro] = useState('00:00');
+  const [oreLavoroLive, setOreLavoroLive] = useState("00:00");
+  const [orarioIngresso, setOrarioIngresso] = useState(null);
+
 
 
   //costanti per il popup ASSEGNA MANSIONE 
@@ -41,42 +47,58 @@ function GestorePagOperai() {
 
   //Fa partire fetchStalla appena parte il componente 
   useEffect(() => {
-    fetchStalla(); // recupera idStalla
+   fetchStalla(); // solo questo al primo caricamento
   }, []);
 
-  //Appena e' disponibile idStalla parte
+  // Avvalora orarioIngresso recuperando cartellino.OraIngresso appena si carica la pagina
   useEffect(() => {
-    if (idStalla) {
-      fetchOreLavorate(); //recupera ore lavorate da gestore
-      fetchOperai(); //recupera operai della stalla
-    } 
-  }, [idStalla]);
+    const fetchOrarioIngresso = async () => {
+      try {
+        const res = await fetch(`${SERVER_URL}/gestore-pag-operai/orario-ingresso/${idUtente}`);
+        const data = await res.json();
+        if (data.orarioIngresso && typeof data.orarioIngresso === "string") { //controllo data.orarioIngresso avvalorato ed è una stringa?
+          setOrarioIngresso(data.orarioIngresso); //se data.orarioIngresso supera i controlli può essere usato per avvalorare orarioIngresso
+        }
+      } catch (err) {
+        console.error("Errore recupero orario ingresso:", err);
+      }
+    };
 
-  //Appena e' disponibile idStalla parte
+    if (idUtente) fetchOrarioIngresso();
+  }, [idUtente]);
+
+  // Quando orarioIngresso è disponibile, aggiorna immediatamente oreLavoroLive, poi ogni minuto
+  useEffect(() => {
+    if (!orarioIngresso) return;
+
+    const aggiorna = () => {
+      const aggiornate = calcolaTempoTrascorso(orarioIngresso);
+      setOreLavoroLive(aggiornate);
+    };
+
+    aggiorna(); // calcolo immediato
+    const timer = setInterval(aggiorna, 60000);
+    return () => clearInterval(timer);
+  }, [orarioIngresso]);
+
+  //appena è disponibile idStalla carica gli operai e aggiona ogni 5 secondi
   useEffect(() => {
     if (!idStalla) return;
-    const interval = setInterval(() => { //recupera operai della stalla ogni 5 secondi
-      fetchOperai();
+
+    fetchOperai(); // esegue subito appena disponibile idStalla
+
+    const interval = setInterval(() => {
+      fetchOperai(); // aggiorna ogni 5 secondi
     }, 5000);
-    return () => clearInterval(interval); // chiude timer se si smonta componente o cambia idStalla
+
+   return () => clearInterval(interval);
   }, [idStalla]);
-
-  // Quando idStalla e' disponibile , aggiorna ore lavorate dal gestore ogni minuto 
-  useEffect(() => {
-    if (!idStalla) return;
-    const intervallo = setInterval(() => {
-      fetchOreLavorate(); 
-    }, 60000); 
-    return () => clearInterval(intervallo); //chiude timer se si smonta componente o cambia idStalla
-  }, [idStalla]);
-
-
 
   //------------------------- LOGICA DI GESTOREPAGOPERAI.JSX --------------------------
   //recupera idStalla di stalla del gestore
   const fetchStalla = async () => {
     try {
-      const res = await fetch(`http://localhost:3001/gestore-pag-operai/stalla-gestore/${idUtente}`);
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/stalla-del-gestore/${idUtente}`);
       const data = await res.json();
       if (data.idStalla) {
         setIdStalla(data.idStalla); //salva idStalla
@@ -92,7 +114,7 @@ function GestorePagOperai() {
   const fetchOperai = async () => {
     if (!idStalla) return;
     try {
-      const res = await fetch(`http://localhost:3001/gestore-pag-operai/operai-della-stalla/${idStalla}`);
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/operai-in-stalla/${idStalla}`);
       const data = await res.json();
       setOperai(data.operai); // salva stato operai per riempire tabella in UI 
     } catch (err) {
@@ -100,16 +122,6 @@ function GestorePagOperai() {
     }
   };
 
-  //recupero ore lavorate dal gestore , aggiorna counter
-  const fetchOreLavorate = async () => {
-    try {
-      const res = await fetch(`http://localhost:3001/gestore-pag-operai/ore-lavoro-totali/${idStalla}`);
-      const data = await res.json();
-      setOreLavoro(data.oreLavoro || '00:00'); //salva stato , se NULL scrive : "00:00"
-    } catch (err) {
-      console.error("Errore caricamento ore lavorate:", err);
-    }
-  };
 
   //Calcola percentuale barra di stato nella tabella UI 
   const calcolaPercentuale = (parte, totale) => {
@@ -135,7 +147,7 @@ function GestorePagOperai() {
   const apriPopupAggiungi = async () => {
     setPopupAggiungiVisibile(true); //comparsa popup in UI e' condizionata
     try {
-      const res = await fetch(`http://localhost:3001/gestore-pag-operai/mucche-gestore/${idStalla}`);
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/mucche-in-stalla/${idStalla}`);
       const data = await res.json();
       setMuccheStalla(data); //salva elenco mucche (per tabella mucche da assegnare nel pop-up)
     } catch (err) {
@@ -160,7 +172,7 @@ function GestorePagOperai() {
       return;
     }
     try {
-      const res = await fetch(`http://localhost:3001/gestore-pag-operai/operai-stalla/${idStalla}`);
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/operai-per-popup-modifica/${idStalla}`);
       const data = await res.json();
       setListaOperai(data); //salva lista operai
       setPopupModificaVisibile(true); // attiva popup di modifica
@@ -185,7 +197,7 @@ function GestorePagOperai() {
       return;
     }
     try { // returna solo operai che NON hanno mucche assegnate
-      const res = await fetch(`http://localhost:3001/gestore-pag-operai/operai-eliminabili/${idStalla}`);
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/operai-eliminabili/${idStalla}`);
       const data = await res.json();
       setListaOperaiEliminabili(data); //salva lista
       setPopupEliminaVisibile(true); //visualizza popup in UI
@@ -207,7 +219,7 @@ function GestorePagOperai() {
       return;
     }
     try {
-      const res = await fetch('http://localhost:3001/gestore-pag-operai/invia-mansione-accessoria', {
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/invia-mansione-accessoria`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -235,7 +247,7 @@ function GestorePagOperai() {
       return;
     }
     try {
-      const res = await fetch('http://localhost:3001/gestore-pag-operai/aggiungi-operaio', {
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/aggiungi-operaio`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -260,31 +272,31 @@ function GestorePagOperai() {
   
   //MODIFICA dati di un OPERAIO
   const modificaOperaio = async () => {
-    if (!operaioSelezionato) { //controllo di selezione
+    if (!operaioSelezionato) {
       alert("Per effettuare le modifiche devi selezionare un operaio.");
       return;
     }
     try {
-      const res = await fetch('http://localhost:3001/gestore-pag-operai/modifica-operaio', {
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/modifica-operaio`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           idOperaio: operaioSelezionato.ID,
-          nuovoNome: modificaNomeUtente,
+          nuovoNomeUtente: modificaNomeUtente,
           nuovaPassword: modificaPassword
         })
       });
-      const data = await res.json(); //converte risposta da json
-      if (data.success) {
-        alert("Dati modificati con successo");
-        chiudiPopupModifica();
-        fetchOperai(); //ricarica lista operai
-      } else {
-        alert("Errore modifica: " + data.message);
-      }
-    } catch (err) {
-      console.error("Errore modifica operaio:", err);
+    const data = await res.json();
+    if (data.success) {
+      alert("Dati modificati con successo");
+      chiudiPopupModifica();
+      fetchOperai();
+    } else {
+      alert("Errore modifica: " + data.message);
     }
+  } catch (err) {
+    console.error("Errore modifica operaio:", err);
+  }
   };
 
   //ELIMINAZIONE di un OPERAIO
@@ -294,7 +306,7 @@ function GestorePagOperai() {
       return;
     }
     try {
-      const res = await fetch('http://localhost:3001/gestore-pag-operai/elimina-operaio', {
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/elimina-operaio`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idOperaio: operaioDaEliminare })
@@ -326,7 +338,7 @@ function GestorePagOperai() {
         </div>
         {/*Destra della barra */}
         <div className="gestore-destra">
-          <span className="gestore-ore"><strong>Ore lavorate oggi:</strong> {oreLavoro}</span>
+          <span className="gestore-ore"><strong>Ore lavorate oggi:</strong> {oreLavoroLive}</span>
           <button
             className="gestore-termina-turno"
             onClick={() => navigate('/TimbraUscita')}> Termina Turno 
@@ -363,7 +375,7 @@ function GestorePagOperai() {
 
               {operaio.TotaleQuotidiane === 0 ? (
                 <td colSpan="3" style={{ fontStyle: 'italic', fontSize: '13px', textAlign: 'center' }}>
-                  L'operaio non ha nessuna mucca assegnata
+                  L'operaio non ha nessuna Mansione Quotidiana assegnata.
                 </td>
               ) : (
                 <>
@@ -407,7 +419,7 @@ function GestorePagOperai() {
                 )}
               </td>
 
-              <td>{operaio.OreLavorate || 0}</td>
+              <td>{operaio.OreLavorate || "00:00"}</td>
 
               <td>
                 <button onClick={() => apriPopupAssegna(operaio)}>Assegna</button>

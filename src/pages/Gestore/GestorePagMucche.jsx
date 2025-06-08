@@ -1,13 +1,16 @@
 import React, { useEffect, useState , useRef} from 'react';//hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
 import { useNavigate } from 'react-router-dom';//hook per navigare fra le pagine 
-import { useLocation } from 'react-router-dom'; // Controllare 
 import '../../style/GestorePagMucche.css';
+import { SERVER_URL } from '../../config';
+import { calcolaTempoTrascorso } from '../../utils/utilsFrontend';
+
 
 
 function GestorePagMucche() { 
   //Dati Utente
   const idUtente = localStorage.getItem('idUtente');
   const nomeUtente = localStorage.getItem('nomeUtente'); // prende da browser
+  const [oraIngresso, setOraIngresso] = useState(null);
   //Stati principali della pagina
   const [mucche, setMucche] = useState([]);
   const [oreLavoro, setOreLavoro] = useState(0);
@@ -27,25 +30,30 @@ function GestorePagMucche() {
 
   // Parte al caricamento della pagina , refresha ogni 5 secondi 
   useEffect(() => {
-    fetchMucche(); //recupera mucche in stalla
-    fetchOreLavorate(); //recupera ore lavorate da gestore
+    fetchMucche(); //recupera mucche in stalla 
     const interval = setInterval(() => {fetchMucche();}, 5000);
     return () => clearInterval(interval); // pulizia all'uscita
   },[]);
 
   //Parte al caricamento della pagina , refresha ogni 60 secondi
-  useEffect(() => {
-  const interval = setInterval(() => {
-    fetchOreLavorate(); // aggiorna counter ore lavorate
-  }, 60000);
-  return () => clearInterval(interval); // pulizia all'uscita
-  }, []);
+    useEffect(() => {
+      fetchOraIngresso(); //recupera ore lavorate da gestore
+      if (!oraIngresso) return;
+      const aggiornaOre = () => {
+        const tempo = calcolaTempoTrascorso(oraIngresso);
+        setOreLavoro(tempo);
+      };
+      aggiornaOre(); // calcolo immediato
+      const timer = setInterval(aggiornaOre, 60000); // ogni minuto
+      return () => clearInterval(timer);
+    }, [oraIngresso]);
+
   
-  //-------------------- LOGICA DI GESTOREPAGMUCCHE.JSX -----------------------
+  //------------------------------------ LOGICA DI GESTOREPAGMUCCHE.JSX -----------------------
   // Carica tutte le mucche in questa stalla
   const fetchMucche = async () => {
     try {
-      const res = await fetch(`http://localhost:3001/mucche-gestore/${idUtente}`);
+      const res = await fetch(`${SERVER_URL}/gestore-pag-mucche/mucche-in-stalla/${idUtente}`);
       const data = await res.json(); //carica da json
       if (!data || !data.idStalla) {
         throw new Error("Dati mancanti dal backend");
@@ -64,7 +72,7 @@ function GestorePagMucche() {
   // Carica tutti gli operai che lavorano in questa stalla 
   const fetchOperai = async (idStalla) => {
     try {
-      const res = await fetch(`http://localhost:3001/operai-stalla/${idStalla}`);
+      const res = await fetch(`${SERVER_URL}/gestore-pag-mucche/operai-in-stalla/${idStalla}`);
       const data = await res.json(); 
       if (!data.operai || !Array.isArray(data.operai)) { // controlla che ci sia l'array operai 
         throw new Error("Formato JSON non valido: manca 'operai'");
@@ -76,17 +84,16 @@ function GestorePagMucche() {
     }
   };
 
- // MODIFICA: IL 20 Mag
   // Calcola ore lavorate oggi dal gestore
-  const fetchOreLavorate = async () => {
-  try {
-    const res = await fetch(`http://localhost:3001/ore-lavoro-gestore/${idUtente}`);
-    const data = await res.json();
-    setOreLavoro(data.oreLavoro);
-  } catch (err) {
-    console.error('Errore caricamento ore lavorate', err);
-  }
-};
+    const fetchOraIngresso = async () => {
+    try {
+      const res = await fetch(`${SERVER_URL}/gestore-pag-mucche/ore-lavorate/${idUtente}`);
+      const data = await res.json();
+      setOraIngresso(data.oraIngresso || null); // salva orario
+    } catch (err) {
+      console.error('Errore caricamento ora ingresso', err);
+    }
+  };
   
   // APRE I POP-UP
   const apriPopup = async (tipo) => {
@@ -110,7 +117,7 @@ function GestorePagMucche() {
       return;
     }
     try {
-      await fetch('http://localhost:3001/aggiungi-mucca', {
+      await fetch(`${SERVER_URL}/gestore-pag-mucche/aggiungi-mucca`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...popupData, idStalla })
@@ -138,7 +145,7 @@ function GestorePagMucche() {
       return;
     }
     try {
-      await fetch('http://localhost:3001/modifica-mucca', {
+      await fetch(`${SERVER_URL}/gestore-pag-mucche/modifica-mucca`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(popupData)
@@ -157,7 +164,7 @@ function GestorePagMucche() {
       return;
     }
     try {
-      await fetch('http://localhost:3001/elimina-mucca', {
+      await fetch(`${SERVER_URL}/gestore-pag-mucche/elimina-mucca`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idMucca: popupData.idMucca })
@@ -179,10 +186,14 @@ function GestorePagMucche() {
   // evidenzia parola cercata col finder
   const evidenzia = (testo) => {
     if (!parolaEvidenziata) return testo;
-    const regex = new RegExp(`(${parolaEvidenziata})`, 'gi');
+
+    const parole = parolaEvidenziata.trim().split(/\s+/).filter(p => p.length > 0);
+    if (parole.length === 0) return testo;
+
+    const regex = new RegExp(`(${parole.join('|')})`, 'gi');
     return testo.replace(regex, '<mark>$1</mark>');
   };
-  
+
   righeRef.current.found = null; //pulisce riferimento alla precedente riga trovata 
 
 
