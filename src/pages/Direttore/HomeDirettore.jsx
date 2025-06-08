@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';//hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
 import { useNavigate } from 'react-router-dom'; //hook per navigazione tra pagine
 import '../../style/HomeDirettore.css'; 
+import { SERVER_URL } from '../../config';
+
+
 
 function HomeDirettore() {
   //Dati utente
@@ -27,7 +30,7 @@ function HomeDirettore() {
   //Carica stato azienda
   const fetchStatoAzienda = async () => {
     try {
-      const res = await fetch('http://localhost:3001/home-direttore');
+      const res = await fetch(`${SERVER_URL}/home-direttore/stato-azienda`);
       const data = await res.json();
       setStatoAzienda(data); 
     } catch (err) {
@@ -38,7 +41,7 @@ function HomeDirettore() {
   //Carica lista delle stalle
   const fetchStalle = async () => {
     try {
-      const res = await fetch('http://localhost:3001/home-direttore/stalle');
+      const res = await fetch(`${SERVER_URL}/home-direttore/singole-stalle`);
       const data = await res.json();
       setStalle(data);
     } catch (err) {
@@ -53,7 +56,7 @@ function HomeDirettore() {
       return;
     }
     try {
-      await fetch('http://localhost:3001/comunica-gestore', {
+      await fetch(`${SERVER_URL}/home-direttore/invia-comunicazione`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
