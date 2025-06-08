@@ -1,6 +1,8 @@
 import React, { useState } from 'react'; // useState = gestire il local state reattivo 
 import { useNavigate } from 'react-router-dom'; // hook di React Router per navigare tra le pagine
 import '../../style/Accesso.css';
+import { SERVER_URL } from '../../config';
+
 
 function Accesso() {
   // Variabili di stato
@@ -14,7 +16,7 @@ function Accesso() {
   const handleLogin = async () => {
     try {
 
-      const res = await fetch('http://localhost:3001/login', {
+      const res = await fetch(`${SERVER_URL}/accesso`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nomeUtente, password })

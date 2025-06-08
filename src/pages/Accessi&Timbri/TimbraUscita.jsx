@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react'; //hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
 import { useNavigate } from 'react-router-dom'; //hook per navigare fra le pagine 
 import '../../style/TimbraUscita.css'; 
+import { SERVER_URL } from '../../config';
+
+
 
 
 
@@ -14,7 +17,7 @@ function TimbraUscita() {
   useEffect(() => {
     const fetchOre = async () => {
       try {
-        const res = await fetch(`http://localhost:3001/ore-lavoro/${idUtente}`);
+        const res = await fetch(`${SERVER_URL}/timbra-uscita/ore-lavorate/${idUtente}`);
         const data = await res.json();
         setOreLavoro(data.oreLavoro);
       } catch (err) {
@@ -27,7 +30,7 @@ function TimbraUscita() {
   //-------------------- LOGICA DI TIMBRATURA ----------------------
   const terminaTurno = async () => {
     try {
-      const res = await fetch('http://localhost:3001/timbra-uscita', {
+      const res = await fetch(`${SERVER_URL}/timbra-uscita`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idUtente })
