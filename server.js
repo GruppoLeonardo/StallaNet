@@ -3,31 +3,25 @@ const mysql = require('mysql2'); // 2 = pacchetto piu' moderno e asincrono
 const cors = require('cors'); // Blocca/Permette richieste da altri domini o porte (3001+5173) 
 const bodyParser = require('body-parser'); // Per leggere JSON dentro ai POST 
 
-  const app = express(); // crea istanza express (per usare app.get() , app.post()...)
-  app.use(cors());
-  app.use(bodyParser.json());
+const {
+  getDataOdierna,
+  getOraAttuale,
+  formattaDurata,
+  calcolaTempoTrascorsoOperai,
+  calcolaDifferenzaOrari
+} = require('./utils');
 
-  // CONNESSIONE DATABASE
-  const conn = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: 'SQLitps2324Gio', 
-    database: 'StallaNet'
-  });
+require('./tasks/scheduler');
+const conn = require('./connDb');// crea ad attiva la connessione al database
 
-  // Attiva connessione Database
-  conn.connect(err => {
-    if (err) throw err;
-    console.log('Connected to MySQL');
-  });
-
-
-
+const app = express(); // crea istanza express (per usare app.get() , app.post()...)
+app.use(cors());
+app.use(bodyParser.json());
 
 
 //ACCESSO.JSX
-// ----------------- Accesso.jsx --> /LOGIN        (Autenticazione con credenziali/Definire Ruolo/Stato Cartellino)-----------------
-  app.post('/login', (req, res) => {
+// -------------------- /ACCESSO   (Login utente, verifica credenziali, definizione ruolo e stato del cartellino)----------------------
+  app.post('/accesso', (req, res) => {
     const { nomeUtente, password } = req.body; //metti in costanti dati JSON arrivati da frontend 
 
     //Query per trovare utente che sta accedendo.
@@ -53,7 +47,7 @@ const bodyParser = require('body-parser'); // Per leggere JSON dentro ai POST
         });
       }
 
-      const oggi = '2025-01-01'; //hardcoded 
+      const oggi = getDataOdierna(); //hardcoded 
 
       const cartellinoQuery = `
         SELECT * FROM Cartellino
@@ -106,15 +100,12 @@ const bodyParser = require('body-parser'); // Per leggere JSON dentro ai POST
   });
 
 
-
-
-
 //TIMBRAENTRATA.JSX
-// ----------------- TimbraEntrata.jsx --> /TIMBRA-INGRESSO         (Timbratura di OrarioEntrata) -----------------
+// -------------------- /TIMBRA-INGRESSO   (Segna OraIngresso in Cartellino) ----------------------
   app.post('/timbra-ingresso', (req, res) => {
     const {idUtente} = req.body; //id utente
-    const ora = '17:00:00'; // hardcoded 
-    const data = '2025-01-01'; // hardoded 
+    const ora = getOraAttuale();
+    const data = getDataOdierna(); // hardoded 
 
     const updateQuery = 
     `UPDATE Cartellino
@@ -139,14 +130,47 @@ const bodyParser = require('body-parser'); // Per leggere JSON dentro ai POST
   });
 
 
-
-
 //TIMBRAUSCITA.JSX
-// ----------------- TimbraUscita.jsx --> /TIMBRA-USCITA          (Segna nel Cartellino l'orario di uscita) -----------------
+// -------------------- /ORE-LAVORATE    (Calcola ore lavorate da mostrare in uscita) --------------------         
+  app.get('/timbra-uscita/ore-lavorate/:idUtente', (req, res) => {
+  const idUtente = req.params.idUtente;
+  const data = getDataOdierna();
+
+  const query = `
+    SELECT OraIngresso
+    FROM Cartellino
+    WHERE idUtente = ? AND DATE(Data) = ?
+  `;
+
+  conn.query(query, [idUtente, data], (err, result) => {
+    if (err) {
+      console.error('Errore nel calcolo minuti lavorati:', err);
+      return res.status(500).json({ error: 'Errore server' });
+    }
+
+    const oraIngresso = result[0]?.OraIngresso;
+    if (!oraIngresso) {
+      return res.status(404).json({ error: 'Ora di ingresso non trovata' });
+    }
+
+    const now = new Date(); // ora attuale del sistema
+    const oggi = getDataOdierna();
+    const ingresso = new Date(`${oggi}T${oraIngresso}`);
+
+    const diffMs = now - ingresso;
+    const diffMinuti = Math.max(Math.floor(diffMs / 60000), 0);
+    const ore = String(Math.floor(diffMinuti / 60)).padStart(2, '0');
+    const minuti = String(diffMinuti % 60).padStart(2, '0');
+
+    res.json({ oreLavoro: `${ore}:${minuti}` });
+  });
+  });
+
+// -------------------- /TIMBRA-USCITA    (Segna OraUscita in Cartellino) -----------------
   app.post('/timbra-uscita', (req, res) => {
     const { idUtente } = req.body;
-    const ora = '17:00:00'; // hardcoded
-    const data = '2025-01-01'; // hardcoded
+    const ora = getOraAttuale(); // hardcoded
+    const data = getDataOdierna(); // hardcoded
   
     const query = `
       UPDATE Cartellino
@@ -163,95 +187,94 @@ const bodyParser = require('body-parser'); // Per leggere JSON dentro ai POST
     });
   });
 
-  //AGGIUNTA il 20 maggio 
-  // ----------------  TimbraUscita.jsx --> /ore-lavoro/:idUtente           
-  app.get('/ore-lavoro/:idUtente', (req, res) => {
-  const idUtente = req.params.idUtente;
-  const data = '2025-01-01'; // hardcoded
 
-  const query = `
-    SELECT TIMESTAMPDIFF(MINUTE, OraIngresso, COALESCE(OraUscita, '17:00:00')) AS minutiLavorati
+//HOMEOPERAIO.JSX
+// --------------------- /DATI-OPERAIO    (Carica Mansioni Quotidiane/Accessorie dell'operaio)-----------------
+  app.get('/home-operaio/dati-operaio/:idUtente', (req, res) => {
+  const idUtente = req.params.idUtente;
+  const data = getDataOdierna();
+
+  const cartellinoQuery = `
+    SELECT OraIngresso
     FROM Cartellino
     WHERE idUtente = ? AND DATE(Data) = ?
   `;
 
-  conn.query(query, [idUtente, data], (err, result) => {
-    if (err) {
-      console.error('Errore nel calcolo minuti lavorati:', err);
-      return res.status(500).json({ error: 'Errore server' });
-    }
-
-    const minuti = result[0]?.minutiLavorati || 0;
-    const ore = String(Math.floor(minuti / 60)).padStart(2, '0');
-    const minutiRestanti = String(minuti % 60).padStart(2, '0');
-
-    res.json({ oreLavoro: `${ore}:${minutiRestanti}` });
-  });
-});
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-//HOMEOPERAIO.JSX
-// ----------------- HomeOperaio.jsx --> /HOME-OPERAIO/:IDUTENTE        (Mostrare al frontend:Mansioni Quotidiane/Mansioni Accessorie/Invia Segnalazione-----------------
-  app.get('/home-operaio/:idUtente', (req, res) => {
-    const idUtente = req.params.idUtente; // riceve idUtente come paramentro da URL
-    const data = '2025-01-01'; // hardcoded
-    
-    // Calcola ore lavorate fino ad ora
-    const cartellinoQuery = `
-    SELECT OraIngresso
-    FROM Cartellino
-    WHERE idUtente = ? AND DATE(Data) = ?`;  
-    //Trova quotidiane
-    const bestiameQuery = `
+  const bestiameQuery = `
     SELECT Q.ID, Q.idAnimale, Q.Pulizia, Q.Mungitura1, Q.Mungitura2, Q.Alimentazione
     FROM Quotidiana Q
-    WHERE Q.idOperaio = ? AND DATE(Q.Data) = ?`;
-    
-    //Trova accessorie 
-    const accessorieQuery = 
-    `SELECT ID, Testo, Stato
+    WHERE Q.idOperaio = ? AND DATE(Q.Data) = ?
+  `;
+
+  const accessorieQuery = `
+    SELECT ID, Testo, Stato
     FROM Comunicazione
     WHERE idDestinatario = ? AND DATE(DataInvio) = ? AND idMittente IN (
-     SELECT U2.ID FROM Utente U2 WHERE U2.Ruolo = 'gestore'
-    )`;
-  
-    const finalResponse = {}; // Array per mettere i vari risulati delle query 
-  
-    conn.query(cartellinoQuery, [idUtente, data], (err, cartResult) => {
-      if (err) return res.status(500).json({ error: 'Errore cartellino' });
-      finalResponse.oreLavoro = cartResult[0]?.oreLavoro || 0;
-      
-      finalResponse.oraIngresso = cartResult[0]?.OraIngresso || null;
+      SELECT U2.ID FROM Utente U2 WHERE U2.Ruolo = 'gestore'
+    )
+  `;
 
-      conn.query(bestiameQuery, [idUtente, data], (err2, bestiameResult) => {
-        if (err2) return res.status(500).json({ error: 'Errore bestiame' });
-        finalResponse.capiBestiame = bestiameResult;
-  
-        conn.query(accessorieQuery, [idUtente, data], (err3, accessorieResult) => {
-          if (err3) return res.status(500).json({ error: 'Errore accessorie' });
-          finalResponse.mansioniAccessorie = accessorieResult;
-  
-          res.json(finalResponse); //Invio dell'array riempito
-        });
+  const finalResponse = {};
+
+  conn.query(cartellinoQuery, [idUtente, data], (err, cartResult) => {
+    if (err) return res.status(500).json({ error: 'Errore cartellino' });
+
+    const oraIngresso = cartResult[0]?.OraIngresso || null;
+    finalResponse.oraIngresso = oraIngresso;
+
+    if (oraIngresso) {
+      const ingresso = new Date(`${data}T${oraIngresso}`);
+      const now = new Date();
+      const diffMinuti = Math.max(Math.floor((now - ingresso) / 60000), 0);
+      finalResponse.oreLavoro = formattaDurata(diffMinuti);
+    } else {
+      finalResponse.oreLavoro = "00:00";
+    }
+
+    conn.query(bestiameQuery, [idUtente, data], (err2, bestiameResult) => {
+      if (err2) return res.status(500).json({ error: 'Errore bestiame' });
+      finalResponse.capiBestiame = bestiameResult;
+
+      conn.query(accessorieQuery, [idUtente, data], (err3, accessorieResult) => {
+        if (err3) return res.status(500).json({ error: 'Errore accessorie' });
+        finalResponse.mansioniAccessorie = accessorieResult;
+
+        res.json(finalResponse);
       });
     });
   });
+  });
 
-// ----------------- HomeOperaio.jsx --> /UPDATE-QUOTIDIANA          (Aggiornare le quotidiane per una mucca)-----------------
-  app.post('/update-quotidiana', (req, res) => {
+// --------------------- /NOME-GESTORE   (Recupera il Gestore dell'operaio) -----------------
+  app.get('/home-operaio/nome-gestore/:idUtente', (req, res) => {
+    const { idUtente } = req.params;
+
+    const query = `
+      SELECT u.NomeUtente AS NomeGestore
+      FROM Utente o
+      JOIN Animale a ON a.idOperaio = o.ID
+      JOIN Gestione g ON a.idStalla = g.idStalla
+      JOIN Utente u ON g.idGestore = u.ID
+      WHERE o.ID = ?
+      LIMIT 1
+    `;
+
+    conn.query(query, [idUtente], (err, rows) => {
+      if (err) {
+        console.error('Errore nel recupero del gestore:', err);
+        return res.status(500).json({ message: "Errore interno del server" });
+      }
+
+      if (rows.length === 0) {
+        return res.status(404).json({ message: "Gestore non trovato" });
+      }
+
+      res.json(rows[0]); 
+    });
+  });
+  
+// --------------------- /AGGIORNA-QUOTIDIANE    (Aggiornare la tabella delle Mansioni Quotidiane)-----------------
+  app.post('/home-operaio/aggiorna-quotidiane', (req, res) => {
     const { idQuotidiana, campo, valore } = req.body;
   
     // Protezione: Si possono aggiornare solo i 4 campi
@@ -272,9 +295,9 @@ const bodyParser = require('body-parser'); // Per leggere JSON dentro ai POST
       res.json({ success: true });
     });
   });
-  
-// ----------------- HomeOperaio.jsx --> /SEGNA-MANSIONE-ACCESSORIA            (Aggiornare le mansioni accessorie)-----------------
-  app.post('/segna-mansione-accessoria', (req, res) => {
+
+// --------------------- /AGGIORNA-MANSIONE-ACCESSORIA    (Aggiornare le Mansioni accessorie)-----------------
+  app.post('/home-operaio/aggiorna-mansione-accessoria', (req, res) => {
     const { idComunicazione, nuovoStato } = req.body;
 
     const query = 
@@ -291,10 +314,10 @@ const bodyParser = require('body-parser'); // Per leggere JSON dentro ai POST
     });
   });
 
-// ----------------- HomeOperaio.jsx --> INVIA-SEGNALAZIONE          (Mette in database comunicazione da mandare al proprio gestore)-----------------
-  app.post('/invia-segnalazione', (req, res) => {
+// --------------------- /INVIA-SEGNALAZIONE          (Segna la comunicazione al Gestore)-----------------
+  app.post('/home-operaio/invia-segnalazione', (req, res) => {
     const { idMittente, testo } = req.body;
-    const data = '2025-01-01'; // hardcoded 
+    const data = new Date(); // hardcoded 
   
     // Capire in che stalla lavora l'operaio
     const getStallaQuery = 
@@ -344,98 +367,71 @@ const bodyParser = require('body-parser'); // Per leggere JSON dentro ai POST
     });
   });
 
-// ----------------- HomeOperaio.jsx --> HOME-OPERAIO/GESTORE/:ID         (Recupera il Gestore dell'operaio) -----------------
-  app.get('/home-operaio/gestore/:id', (req, res) => {
-    const { id } = req.params;
-
-    const query = `
-      SELECT u.NomeUtente AS NomeGestore
-      FROM Utente o
-      JOIN Animale a ON a.idOperaio = o.ID
-      JOIN Gestione g ON a.idStalla = g.idStalla
-      JOIN Utente u ON g.idGestore = u.ID
-      WHERE o.ID = ?
-      LIMIT 1
-    `;
-
-    conn.query(query, [id], (err, rows) => {
-      if (err) {
-        console.error('Errore nel recupero del gestore:', err);
-        return res.status(500).json({ message: "Errore interno del server" });
-      }
-
-      if (rows.length === 0) {
-        return res.status(404).json({ message: "Gestore non trovato" });
-      }
-
-      res.json(rows[0]); 
-    });
-  });
-
-
-
-
-
-
-
-
-
-
-
 
 // GESTOREPAGHOME.JSX
-// ----------------- GestorePagHome.jsx --> /HOME-GESTORE/:IDUTENTE              (Mostra ore lavorate,visualizzare comunicazioni,vedere e filtrare i Partner) -----------------
-  app.get('/home-gestore/:idUtente', (req, res) => {
-    const idUtente = req.params.idUtente; // prende id utente dall'url 
-    const data = '2025-01-01'; //hardcoded 
-    const ruoloPartner = req.query.ruoloPartner || 'fornitore'; // partner di default = fornitore 
-  
-    const oreQuery =  //Calcola ore di lavoro svolte
-      `SELECT 
-        TIMESTAMPDIFF(MINUTE, OraIngresso, COALESCE(OraUscita, '17:00:00')) AS minutiLavoro
+// --------------------- /GESTORE-PAG-HOME           (Mostra ore lavorate,visualizzare comunicazioni,vedere e filtrare i Partner) -----------------
+  app.get('/gestore-pag-home/:idUtente', (req, res) => {
+    const idUtente = req.params.idUtente;
+    const data = getDataOdierna(); // usa la data odierna reale
+    const ruoloPartner = req.query.ruoloPartner || 'fornitore';
+
+    const oreQuery = `
+      SELECT OraIngresso, OraUscita
       FROM Cartellino
-      WHERE idUtente = ? AND DATE(Data) = ?`;
-  
-    const comunicazioniQuery = //Trova tutte comunicazioni per oggi
-      `SELECT ID, Testo, Stato
+      WHERE idUtente = ? AND DATE(Data) = ?
+    `;
+
+    const comunicazioniQuery = `
+      SELECT ID, Testo, Stato
       FROM Comunicazione
-      WHERE idDestinatario = ? AND DATE(DataInvio) = ?`;
-  
-    const partnerQuery = //Trova tutti i partner collegati al gestore
-      `SELECT P.ID, P.Nominativo, P.Descrizione, P.Telefono , P.Email
+      WHERE idDestinatario = ? AND DATE(DataInvio) = ?
+    `;
+
+    const partnerQuery = `
+      SELECT P.ID, P.Nominativo, P.Descrizione, P.Telefono , P.Email
       FROM Partner P
       JOIN Corrispondenza C ON C.idPartner = P.ID
-      WHERE C.idGestore = ? AND P.Ruolo = ?`;
-  
-    const result = {}; //Oggetto per tenere tutti i dati 
-    
-    // Ottiene tutti i dati e li mette in result
+      WHERE C.idGestore = ? AND P.Ruolo = ?
+    `;
+
+    const result = {};
+
     conn.query(oreQuery, [idUtente, data], (err, oreRes) => {
       if (err) return res.status(500).json({ error: 'Errore ore' });
-  
-      const minutiTotali = oreRes[0]?.minutiLavoro || 0;
-      const ore = String(Math.floor(minutiTotali / 60)).padStart(2, '0');
-      const minuti = String(minutiTotali % 60).padStart(2, '0');
-      result.oreLavoro = `${ore}:${minuti}`;
 
-  
+      const oraIngresso = oreRes[0]?.OraIngresso;
+      const oraUscita = oreRes[0]?.OraUscita;
+
+      result.oraIngresso = oraIngresso || null; // 👈 AGGIUNTO
+
+      if (!oraIngresso) {
+        result.oreLavoro = "00:00";
+      } else {
+        const inizio = new Date(`${data}T${oraIngresso}`);
+        const fine = oraUscita ? new Date(`${data}T${oraUscita}`) : new Date();
+        const diffMinuti = Math.max(Math.floor((fine - inizio) / 60000), 0);
+        const ore = String(Math.floor(diffMinuti / 60)).padStart(2, '0');
+        const minuti = String(diffMinuti % 60).padStart(2, '0');
+        result.oreLavoro = `${ore}:${minuti}`;
+      }
+
       conn.query(comunicazioniQuery, [idUtente, data], (err2, commRes) => {
         if (err2) return res.status(500).json({ error: 'Errore comunicazioni' });
-  
+
         result.comunicazioni = commRes;
-  
+
         conn.query(partnerQuery, [idUtente, ruoloPartner], (err3, partnerRes) => {
           if (err3) return res.status(500).json({ error: 'Errore contatti' });
-  
+
           result.contatti = partnerRes;
-          res.json(result); // manda risultati completi al frontend in json 
+          res.json(result);
         });
       });
     });
   });
 
-// ----------------- GestorePagHome.jsx --> /AGGIORNA-LETTURA                 (Rispecchia in DB le modifiche fatte alla tabella Comunicazioni) -----------------
-  app.post('/aggiorna-lettura', (req, res) => {
+// --------------------- /AGGIORNA-LETTURA            (Aggiorna in DB le modifiche fatte alla tabella Comunicazioni) -----------------
+  app.post('/gestore-pag-home/aggiorna-lettura', (req, res) => {
     const { idComunicazione, nuovoStato } = req.body; // riceve valori
   
     const query = // aggiorna la comunicazione
@@ -449,125 +445,9 @@ const bodyParser = require('body-parser'); // Per leggere JSON dentro ai POST
   });
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-//GESTOREPAGOPERAI.JSX
-//recupero OPERAI della STALLA di un GESTORE e stato delle QUODIDIANE a loro associate  (per la tabella Operai Stalla)
-app.get('/gestore-pag-operai/operai-della-stalla/:idStalla', (req, res) => {
-  const idStalla = req.params.idStalla;
-
-  const query = `
-    SELECT 
-      u.ID AS IdOperaio,
-      u.NomeUtente,
-
-      -- Pulizie svolte
-      (
-        SELECT COUNT(*)
-        FROM Quotidiana q
-        WHERE q.idOperaio = u.ID 
-          AND DATE(q.Data) = '2025-01-01' 
-          AND q.Pulizia = 1
-      ) AS PulizieSvolte,
-
-      -- Mungiture svolte (Mungitura1 + Mungitura2)
-      (
-        SELECT SUM(
-          (CASE WHEN q.Mungitura1 = 1 THEN 1 ELSE 0 END) + 
-          (CASE WHEN q.Mungitura2 = 1 THEN 1 ELSE 0 END)
-        )
-        FROM Quotidiana q
-        WHERE q.idOperaio = u.ID 
-          AND DATE(q.Data) = '2025-01-01'
-      ) AS MungitureSvolte,
-
-      -- Alimentazioni svolte
-      (
-        SELECT COUNT(*)
-        FROM Quotidiana q
-        WHERE q.idOperaio = u.ID 
-          AND DATE(q.Data) = '2025-01-01' 
-          AND q.Alimentazione = 1
-      ) AS AlimentazioniSvolte,
-
-      -- Mansioni accessorie completate
-      (
-        SELECT COUNT(*)
-        FROM Comunicazione c
-        WHERE c.idDestinatario = u.ID 
-          AND DATE(c.DataInvio) = '2025-01-01' 
-          AND c.idMittente IN (
-            SELECT ID FROM Utente WHERE Ruolo = 'gestore'
-          )
-          AND c.Stato = 1
-      ) AS MansioniSvolte,
-
-      -- Ore lavorate (differenza tra ora ingresso e ora uscita, o fine giornata)
-      (
-        SELECT CASE 
-           WHEN ca.OraUscita IS NOT NULL 
-            THEN TIMESTAMPDIFF(HOUR, CONCAT('2025-01-01 ', ca.OraIngresso), CONCAT('2025-01-01 ', ca.OraUscita))
-          ELSE TIMESTAMPDIFF(HOUR, CONCAT('2025-01-01 ', ca.OraIngresso), '2025-01-01 17:00:00')
-        END
-        FROM Cartellino ca
-        WHERE ca.idUtente = u.ID 
-          AND DATE(ca.Data) = '2025-01-01'
-      ) AS OreLavorate,
-
-      -- Totale mungiture attese (2 per ogni quotidiana)
-      (
-        SELECT COUNT(*) * 2
-        FROM Quotidiana q
-        WHERE q.idOperaio = u.ID 
-          AND DATE(q.Data) = '2025-01-01'
-      ) AS TotaleMungiture,
-
-      -- Totale quotidiane assegnate
-      (
-        SELECT COUNT(*)
-        FROM Quotidiana q
-        WHERE q.idOperaio = u.ID 
-          AND DATE(q.Data) = '2025-01-01'
-      ) AS TotaleQuotidiane,
-
-      -- Totale mansioni accessorie assegnate
-      (
-        SELECT COUNT(*)
-        FROM Comunicazione c
-        WHERE c.idDestinatario = u.ID 
-          AND DATE(c.DataInvio) = '2025-01-01'
-      ) AS TotaleMansioni
-
-    FROM Utente u
-    WHERE 
-      u.Ruolo = 'operaio' 
-      AND u.Disattivato = 0 
-      AND u.idStalla = ?;
-
-  `;
-
-  conn.query(query, [idStalla], (err, results) => {
-    if (err) {
-      console.error("Errore nel recupero operai della stalla:", err);
-      return res.status(500).json({ error: "Errore server" });
-    }
-
-    res.json({ operai: results });
-  });
-});
-
-//recupero STALLA ASSOCIATA ad un GESTORE (visualizzare l'ID della stalla)
-app.get('/gestore-pag-operai/stalla-gestore/:idGestore', (req, res) => {
+// GESTOREPAGOPERAI.JSX
+//--------------------- /STALLA-DEL-GESTORE        (recupera la stalla affidata al Gestore)----------------------
+  app.get('/gestore-pag-operai/stalla-del-gestore/:idGestore', (req, res) => {
   const idGestore = req.params.idGestore;
 
   const query = `
@@ -582,24 +462,256 @@ app.get('/gestore-pag-operai/stalla-gestore/:idGestore', (req, res) => {
       console.error('Errore recupero stalla:', err);
       return res.status(500).json({ error: 'Errore server' });
     }
+
     if (results.length === 0) {
       return res.status(404).json({ error: 'Stalla non trovata' });
     }
+
     res.json({ idStalla: results[0].idStalla });
   });
 });
 
-//invio della MANSIONE ACCESSORIA al database
-app.post('/gestore-pag-operai/invia-mansione-accessoria', (req, res) => {
+//--------------------- /OPERAI-IN-STALLA           (recupero Elenco operai assegnati in questa stalla + ore lavorate da ognuno)--------------------- 
+  app.get('/gestore-pag-operai/operai-in-stalla/:idStalla', (req, res) => {
+  const idStalla = req.params.idStalla;
+  const dataOggi = getDataOdierna(); // usa data reale
+
+  const query = `
+    SELECT 
+      u.ID AS IdOperaio,
+      u.NomeUtente,
+
+      (
+        SELECT COUNT(*)
+        FROM Quotidiana q
+        WHERE q.idOperaio = u.ID 
+          AND DATE(q.Data) = ?
+          AND q.Pulizia = 1
+          AND q.idAnimale IS NOT NULL
+      ) AS PulizieSvolte,
+
+      (
+        SELECT SUM(
+          (CASE WHEN q.Mungitura1 = 1 THEN 1 ELSE 0 END) + 
+          (CASE WHEN q.Mungitura2 = 1 THEN 1 ELSE 0 END)
+        )
+        FROM Quotidiana q
+        WHERE q.idOperaio = u.ID 
+          AND DATE(q.Data) = ?
+          AND q.idAnimale IS NOT NULL
+      ) AS MungitureSvolte,
+
+      (
+        SELECT COUNT(*)
+        FROM Quotidiana q
+        WHERE q.idOperaio = u.ID 
+          AND DATE(q.Data) = ?
+          AND q.Alimentazione = 1
+          AND q.idAnimale IS NOT NULL
+      ) AS AlimentazioniSvolte,
+
+      (
+        SELECT COUNT(*)
+        FROM Comunicazione c
+        WHERE c.idDestinatario = u.ID 
+          AND DATE(c.DataInvio) = ?
+          AND c.idMittente IN (
+            SELECT ID FROM Utente WHERE Ruolo = 'gestore'
+          )
+          AND c.Stato = 1
+      ) AS MansioniSvolte,
+
+      -- Ora di ingresso (una sola colonna)
+      (
+        SELECT ca.OraIngresso
+        FROM Cartellino ca
+        WHERE ca.idUtente = u.ID 
+          AND DATE(ca.Data) = ?
+        LIMIT 1
+      ) AS OraIngresso,
+
+      -- Ora di uscita (una sola colonna)
+      (
+        SELECT ca.OraUscita
+        FROM Cartellino ca
+        WHERE ca.idUtente = u.ID 
+          AND DATE(ca.Data) = ?
+        LIMIT 1
+      ) AS OraUscita,
+
+      (
+        SELECT COUNT(*) * 2
+        FROM Quotidiana q
+        WHERE q.idOperaio = u.ID 
+          AND DATE(q.Data) = ?
+          AND q.idAnimale IS NOT NULL
+      ) AS TotaleMungiture,
+
+      (
+        SELECT COUNT(*)
+        FROM Quotidiana q
+        WHERE q.idOperaio = u.ID 
+          AND DATE(q.Data) = ?
+          AND q.idAnimale IS NOT NULL
+      ) AS TotaleQuotidiane,
+
+      (
+        SELECT COUNT(*)
+        FROM Comunicazione c
+        WHERE c.idDestinatario = u.ID 
+          AND DATE(c.DataInvio) = ?
+      ) AS TotaleMansioni
+
+    FROM Utente u
+    WHERE 
+      u.Ruolo = 'operaio' 
+      AND u.Disattivato = 0 
+      AND u.idStalla = ?
+  `;
+
+  // Nota: il valore ? viene sostituito *in ordine* quindi va replicato per ogni sottoselezione che usa la data
+  const placeholders = [
+  dataOggi, // Pulizie
+  dataOggi, // Mungiture
+  dataOggi, // Alimentazioni
+  dataOggi, // Mansioni svolte
+  dataOggi, // OraIngresso
+  dataOggi, // OraUscita
+  dataOggi, // Totale mungiture
+  dataOggi, // Totale quotidiane
+  dataOggi, // Totale mansioni
+  idStalla  // Stalla
+  ];
+
+  //per restituire a GestorePagOperai.jsx direttamente le ore lavorate di ogni operaio
+  conn.query(query, placeholders, (err, results) => {  
+    const operaiModificati = results.map(operaio => {
+      const ingresso = operaio.OraIngresso;
+      const uscita = operaio.OraUscita;
+
+      //se non è presente OraIngresso allora OreLavorate = "00:00"
+      if (!ingresso) {
+        operaio.OreLavorate = "00:00";
+        return operaio;
+      }
+
+      //se è presente OraUscita allora usala per il calcolo
+      if (uscita) {
+        operaio.OreLavorate = calcolaDifferenzaOrari(ingresso, uscita); 
+      } else {
+        operaio.OreLavorate = calcolaTempoTrascorsoOperai(ingresso);
+      }
+
+      return operaio;
+    });
+
+    res.json({ operai: operaiModificati });
+  });
+});
+
+//--------------------- /ORARIO-INGRESSO          (recupera le ore lavorate dal Gestore)--------------------- 
+  app.get('/gestore-pag-operai/orario-ingresso/:idUtente', (req, res) => {
+  const { idUtente } = req.params;
+  const dataOggi = getDataOdierna();
+
+  const query = `
+    SELECT OraIngresso
+    FROM Cartellino
+    WHERE idUtente = ? AND DATE(Data) = ?
+    LIMIT 1
+  `;
+
+  conn.query(query, [idUtente, dataOggi], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ message: "Errore server" });
+    }
+
+    if (!rows || rows.length === 0 || !rows[0].OraIngresso) {
+      return res.json({ orarioIngresso: null });
+    }
+
+    const orario = rows[0].OraIngresso.toString(); 
+    res.json({ orarioIngresso: orario });
+  });
+});
+
+//---------------------/MUCCHE-IN-STALLA          (recupero mucche assegnate agli operai)--------------------- 
+  app.get('/gestore-pag-operai/mucche-in-stalla/:idStalla', (req, res) => {
+    const idStalla = req.params.idStalla;
+
+    const query = `
+    SELECT a.ID, u.NomeUtente AS OperaioCorrente
+    FROM Animale a
+    LEFT JOIN Utente u ON a.idOperaio = u.ID
+    WHERE a.idStalla = ?
+    ORDER BY u.NomeUtente IS NULL, u.NomeUtente, a.ID
+  `;
+
+    conn.query(query, [idStalla], (err, result) => {
+      if (err) {
+        console.error("Errore mucche gestore (by idStalla):", err);
+        return res.status(500).json({ error: 'Errore server' });
+      }
+      res.json(result);
+    });
+  });
+
+//--------------------- /OPERAI-PER-POPUP           (recupera OPERAI in base alla STALLA (per popup MODIFICA))--------------------- 
+  app.get('/gestore-pag-operai/operai-per-popup-modifica/:idStalla', (req, res) => {
+    const idStalla = req.params.idStalla;
+
+    const query = `
+      SELECT ID, NomeUtente, Psw
+      FROM Utente
+      WHERE Ruolo = 'operaio' AND Disattivato = 0 AND idStalla = ?
+    `;
+
+    conn.query(query, [idStalla], (err, results) => {
+      if (err) {
+        console.error("Errore recupero operai:", err);
+        return res.status(500).json({ error: "Errore server" });
+      }
+
+      res.json(results);
+    });
+  });
+
+//--------------------- /OPERAI-ELIMINABILI       (recupero operai eliminabili)--------------------- 
+  app.get('/gestore-pag-operai/operai-eliminabili/:idStalla', (req, res) => {
+    const idStalla = req.params.idStalla;
+
+    const query = `
+      SELECT ID, NomeUtente
+      FROM Utente
+      WHERE Ruolo = 'operaio'
+        AND Disattivato = 0
+        AND idStalla = ?
+    `;
+
+    conn.query(query, [idStalla], (err, results) => {
+      if (err) {
+        console.error("Errore recupero operai per eliminazione:", err);
+        return res.status(500).json({ error: "Errore server" });
+      }
+
+      res.json(results);
+    });
+  });
+
+//--------------------- /INVIA-MANSIONE-ACCESSORIA      (invio di Mansione Accessoria) --------------------- 
+  app.post('/gestore-pag-operai/invia-mansione-accessoria', (req, res) => {
   const { idMittente, idDestinatario, testo } = req.body;
-  const dataOggi = '2025-01-01'; // hardcoded per ora
+
+  const data = getDataOdierna();
+  const ora = getOraAttuale();
+  const dataOraCompleta = `${data} ${ora}`;  //unione di data e orario
 
   const insertQuery = `
     INSERT INTO Comunicazione (Testo, Stato, idMittente, idDestinatario, DataInvio)
     VALUES (?, 0, ?, ?, ?)
   `;
 
-  conn.query(insertQuery, [testo, idMittente, idDestinatario, dataOggi], (err, result) => {
+  conn.query(insertQuery, [testo, idMittente, idDestinatario, dataOraCompleta], (err, result) => {
     if (err) {
       console.error('Errore inserimento mansione accessoria', err);
       return res.status(500).json({ success: false });
@@ -608,32 +720,10 @@ app.post('/gestore-pag-operai/invia-mansione-accessoria', (req, res) => {
   });
 });
 
-//recupero delle MUCCHE appartenenti alla STALLA del GESTORE
-app.get('/gestore-pag-operai/mucche-gestore/:idStalla', (req, res) => {
-  const idStalla = req.params.idStalla;
-
-  const query = `
-  SELECT a.ID, u.NomeUtente AS OperaioCorrente
-  FROM Animale a
-  LEFT JOIN Utente u ON a.idOperaio = u.ID
-  WHERE a.idStalla = ?
-  ORDER BY u.NomeUtente IS NULL, u.NomeUtente, a.ID
-`;
-
-  conn.query(query, [idStalla], (err, result) => {
-    if (err) {
-      console.error("Errore mucche gestore (by idStalla):", err);
-      return res.status(500).json({ error: 'Errore server' });
-    }
-    res.json(result);
-  });
-});
-
-//aggiunta di un NUOVO OPERAIO nel database
-//aggiunta di un NUOVO OPERAIO nel database
-app.post('/gestore-pag-operai/aggiungi-operaio', (req, res) => {
+//---------------------/AGGIUNGI-OPERAIO           (aggiunta di un nuovo operaio) --------------------- 
+  app.post('/gestore-pag-operai/aggiungi-operaio', (req, res) => {
   const { nomeUtente, password, mucche, idStalla } = req.body;
-  const dataOggi = '2025-01-01'; // hardcoded per testing
+  const dataOggi = getDataOdierna(); //'YYYY-MM-DD'
 
   if (!nomeUtente || !password || !idStalla) {
     return res.status(400).json({ success: false, message: 'Dati mancanti.' });
@@ -654,299 +744,245 @@ app.post('/gestore-pag-operai/aggiungi-operaio', (req, res) => {
 
     const nuovoID = result.insertId;
 
-    if (muccheArray.length === 0) {
-      return res.json({ success: true });
-    }
-
-    // 1. Assegna le mucche
-    const updateMuccheQuery = `UPDATE Animale SET idOperaio = ? WHERE ID = ?`;
-    const updateQuotidianeQuery = `
-      UPDATE Quotidiana SET idOperaio = ?
-      WHERE idAnimale = ? AND DATE(Data) = ?
+    //creazione di un nuovo CARTELLINO per l'operaio aggiunto
+    const insertCartellinoQuery = `
+      INSERT INTO Cartellino (idUtente, Data)
+      VALUES (?, ?)
     `;
-
-    const updates = muccheArray.map(idMucca => new Promise((resolve, reject) => {
-      // aggiorna animale
-      conn.query(updateMuccheQuery, [nuovoID, idMucca], (err1) => {
-        if (err1) return reject(err1);
-
-        // aggiorna mansioni quotidiane
-        conn.query(updateQuotidianeQuery, [nuovoID, idMucca, dataOggi], (err2) => {
-          if (err2) return reject(err2);
-          resolve();
-        });
-      });
-    }));
-
-    Promise.all(updates)
-      .then(() => res.json({ success: true }))
-      .catch(error => {
-        console.error("Errore aggiornamento mucche o quotidiane:", error);
-        res.status(500).json({ success: false });
-      });
-  });
-});
-
-//recupero OPERAI in base alla STALLA (per popup MODIFICA)
-app.get('/gestore-pag-operai/operai-stalla/:idStalla', (req, res) => {
-  const idStalla = req.params.idStalla;
-
-  const query = `
-    SELECT ID, NomeUtente, Psw
-    FROM Utente
-    WHERE Ruolo = 'operaio' AND Disattivato = 0 AND idStalla = ?
-  `;
-
-  conn.query(query, [idStalla], (err, results) => {
-    if (err) {
-      console.error("Errore recupero operai:", err);
-      return res.status(500).json({ error: "Errore server" });
-    }
-
-    res.json(results);
-  });
-});
-
-//recupero operai eliminabili dal database
-app.get('/gestore-pag-operai/operai-eliminabili/:idStalla', (req, res) => {
-  const idStalla = req.params.idStalla;
-
-  const query = `
-    SELECT ID, NomeUtente
-    FROM Utente
-    WHERE Ruolo = 'operaio'
-      AND Disattivato = 0
-      AND idStalla = ?
-  `;
-
-  conn.query(query, [idStalla], (err, results) => {
-    if (err) {
-      console.error("Errore recupero operai per eliminazione:", err);
-      return res.status(500).json({ error: "Errore server" });
-    }
-
-    res.json(results);
-  });
-});
-
-//eliminazione dell'OPERAIO nel database
-app.post('/gestore-pag-operai/elimina-operaio', (req, res) => {
-  const { idOperaio } = req.body;
-
-  if (!idOperaio) {
-    return res.status(400).json({ success: false, message: 'Operaio non selezionato.' });
-  }
-
-  const checkMuccheQuery = `
-    SELECT COUNT(*) AS count
-    FROM Animale
-    WHERE idOperaio = ?
-  `;
-
-  conn.query(checkMuccheQuery, [idOperaio], (err, result) => {
-    if (err) {
-      console.error("Errore controllo mucche:", err);
-      return res.status(500).json({ success: false, message: 'Errore controllo mucche.' });
-    }
-
-    if (result[0].count > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Per eliminare un operaio è necessario che non abbia nessuna mucca associata ad esso.'
-      });
-    }
-
-    const eliminaQuery = `
-      UPDATE Utente
-      SET Disattivato = 1
-      WHERE ID = ?
-    `;
-
-    conn.query(eliminaQuery, [idOperaio], (err2) => {
+    conn.query(insertCartellinoQuery, [nuovoID, dataOggi], (err2) => {
       if (err2) {
-        console.error("Errore eliminazione operaio:", err2);
-        return res.status(500).json({ success: false, message: 'Errore eliminazione.' });
+        console.error("Errore inserimento cartellino:", err2);
+      }
+
+      //se non sono state selezione mucche da trasferire
+      if (muccheArray.length === 0) {
+        return res.json({ success: true });
+      }
+
+      //assegnazione mucche e delle loro quotidiane all'operaio
+      const updateMuccheQuery =`UPDATE Animale SET idOperaio = ? WHERE ID = ?`;
+      const updateQuotidianeQuery = `
+        UPDATE Quotidiana SET idOperaio = ?
+        WHERE idAnimale = ? AND DATE(Data) = ?
+      `;
+
+      const updates = muccheArray.map(idMucca => new Promise((resolve, reject) => {
+        conn.query(updateMuccheQuery, [nuovoID, idMucca], (err1) => {
+          if (err1) return reject(err1);
+
+          conn.query(updateQuotidianeQuery, [nuovoID, idMucca, dataOggi], (err2) => {
+            if (err2) return reject(err2);
+            resolve();
+          });
+        });
+      }));
+
+      Promise.all(updates)
+        .then(() => res.json({ success: true }))
+        .catch(error => {
+          console.error("Errore aggiornamento mucche o quotidiane:", error);
+          res.status(500).json({ success: false });
+        });
+    });
+  });
+});
+
+//---------------------/MODIFICA-OPERAIO        (modifica dati di un operaio)
+  app.post('/gestore-pag-operai/modifica-operaio', (req, res) => {
+    const { idOperaio, nuovoNomeUtente, nuovaPassword } = req.body;
+
+    if (!idOperaio || !nuovoNomeUtente || !nuovaPassword) {
+      return res.status(400).json({ success: false, message: 'Dati mancanti per la modifica.' });
+    }
+
+    const query = `
+      UPDATE Utente
+      SET NomeUtente = ?, Psw = ?
+      WHERE ID = ? AND Ruolo = 'operaio'
+    `;
+
+    conn.query(query, [nuovoNomeUtente, nuovaPassword, idOperaio], (err, result) => {
+      if (err) {
+        console.error("Errore modifica operaio:", err);
+        return res.status(500).json({ success: false });
       }
 
       res.json({ success: true });
     });
   });
-});
 
-//recupero ORE LAVORATE del GESTORE
-app.get('/gestore-pag-operai/ore-lavoro-totali/:idStalla', (req, res) => {
-  const idStalla = req.params.idStalla;
+//---------------------/ELIMINA-OPERAIO       (elimina un operaio)
+  app.post('/gestore-pag-operai/elimina-operaio', (req, res) => {
+    const { idOperaio } = req.body;
 
-  const query = `
-    SELECT SUM(
-      CASE
-        WHEN c.OraUscita IS NOT NULL 
-        THEN TIMESTAMPDIFF(MINUTE, CONCAT('2025-01-01 ', c.OraIngresso), CONCAT('2025-01-01 ', c.OraUscita))
-        ELSE TIMESTAMPDIFF(MINUTE, CONCAT('2025-01-01 ', c.OraIngresso), '2025-01-01 17:00:00')
-      END
-    ) AS MinutiTotali
-    FROM Cartellino c
-    WHERE DATE(c.Data) = '2025-01-01'
-    AND c.idUtente IN (
-      SELECT DISTINCT a.idOperaio
-      FROM Animale a
-      WHERE a.idStalla = ?
-    )
-  `;
-
-  conn.query(query, [idStalla], (err, result) => {
-    if (err) {
-      console.error("Errore calcolo minuti lavorati:", err);
-      return res.status(500).json({ error: "Errore server" });
+    if (!idOperaio) {
+      return res.status(400).json({ success: false, message: 'Operaio non selezionato.' });
     }
 
-    const minuti = result[0]?.MinutiTotali || 0;
-    const ore = String(Math.floor(minuti / 60)).padStart(2, '0');
-    const minutiRestanti = String(minuti % 60).padStart(2, '0');
-    res.json({ oreLavoro: `${ore}:${minutiRestanti}` });
+    const checkMuccheQuery = `
+      SELECT COUNT(*) AS count
+      FROM Animale
+      WHERE idOperaio = ?
+    `;
+
+    conn.query(checkMuccheQuery, [idOperaio], (err, result) => {
+      if (err) {
+        console.error("Errore controllo mucche:", err);
+        return res.status(500).json({ success: false, message: 'Errore controllo mucche.' });
+      }
+
+      if (result[0].count > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Per eliminare un operaio è necessario che non abbia nessuna mucca associata ad esso.'
+        });
+      }
+
+      const eliminaQuery = `
+        UPDATE Utente
+        SET Disattivato = 1
+        WHERE ID = ?
+      `;
+
+      conn.query(eliminaQuery, [idOperaio], (err2) => {
+        if (err2) {
+          console.error("Errore eliminazione operaio:", err2);
+          return res.status(500).json({ success: false, message: 'Errore eliminazione.' });
+        }
+
+        res.json({ success: true });
+      });
+    });
   });
-});
-
-
-
-
-
-
-
-
-
-
 
 
 // GESTOREPAGMUCCHE.JSX
-// CREATA IL 20 MAggio 
-app.get('/ore-lavoro-gestore/:idUtente', (req, res) => {
-  const idUtente = req.params.idUtente;
-  const data = '2025-01-01'; // hardcoded
+// --------------------- /MUCCHE-IN-STALLA        (Trova tutte le mucche presenti nella stalla del Gestore) ----------------------
+  app.get('/gestore-pag-mucche/mucche-in-stalla/:idUtente', (req, res) => {
+    const { idUtente } = req.params;
 
-  const query = `
-    SELECT TIMESTAMPDIFF(MINUTE, OraIngresso, COALESCE(OraUscita, '17:00:00')) AS minutiLavoro
-    FROM Cartellino
-    WHERE idUtente = ? AND DATE(Data) = ?
-  `;
-
-  conn.query(query, [idUtente, data], (err, result) => {
-    if (err) {
-      console.error('Errore calcolo ore lavorate gestore:', err);
-      return res.status(500).json({ error: 'Errore server' });
-    }
-
-    const minuti = result[0]?.minutiLavoro || 0;
-    const ore = String(Math.floor(minuti / 60)).padStart(2, '0');
-    const minutiRestanti = String(minuti % 60).padStart(2, '0');
-    res.json({ oreLavoro: `${ore}:${minutiRestanti}` });
-  });
-});
-
-// ------------------ GestorePagMucche.jsx --> /MUCCHE-GESTORE/:IDUTENTE         (Trova tutte le mucche presenti nella stalla del Gestore)--------------------
-app.get('/mucche-gestore/:idUtente', (req, res) => {
-  const { idUtente } = req.params;
-
-  const query = `
-    SELECT 
-      S.ID as idStalla,
-      S.Posizione as posizioneStalla,
-      A.ID as ID,
-      A.Nota,
-      A.Vaccinazioni,
-      A.idOperaio,
-      U2.NomeUtente as NomeOperaio
-    FROM Gestione G
-    JOIN Stalla S ON G.idStalla = S.ID
-    LEFT JOIN Animale A ON A.idStalla = S.ID
-    LEFT JOIN Utente U2 ON A.idOperaio = U2.ID
-    WHERE G.IdGestore = ?
-  `;
-
-  conn.query(query, [idUtente], (err, results) => {
-    if (err) {
-      console.error("Errore nella query mucche-gestore:", err);
-      return res.status(500).json({ error: 'Errore interno server' });
-    }
-
-    if (!results || results.length === 0) {
-      return res.status(404).json({ error: 'Nessun dato trovato per questo gestore' });
-    }
-
-    const mucche = results.filter(r => r.ID !== null);
-    const idStalla = results[0].idStalla || null;
-    const posizioneStalla = results[0].posizioneStalla || '';
-
-    res.json({ mucche, idStalla, posizioneStalla });
-  });
-});
-
-//Creata dopo il nuovo database
-app.get('/operai-stalla/:idStalla', (req, res) => {
-  const { idStalla } = req.params;
-
-  const query = `
-    SELECT 
-      U.ID, 
-      U.NomeUtente,
-      COUNT(A.ID) AS numMucche
-    FROM Utente U
-    LEFT JOIN Animale A ON A.idOperaio = U.ID
-    WHERE 
-      U.idStalla = ? 
-      AND U.Ruolo = 'operaio'
-      AND U.Disattivato = 0
-    GROUP BY U.ID
-  `;
-
-  conn.query(query, [idStalla], (err, results) => {
-    if (err) {
-      console.error("Errore nella query operai-stalla:", err);
-      return res.status(500).json({ error: 'Errore interno server' });
-    }
-
-    res.json({ operai: results });
-  });
-});
-
-// ------------------ GestorePagMucche.jsx --> /AGGIUNGI-MUCCA                (POP-UP Aggingi Mucca : aggiunge una nuova mucca nel DB) ------------------
-app.post('/aggiungi-mucca', (req, res) => {
-  const { Nota, Vaccinazioni, idOperaio, idStalla } = req.body; //carica dati inseriti nel form
-  const dataOggi = '2025-01-01'; // per ora hardcoded
-
-  const insertMuccaQuery = `
-    INSERT INTO Animale (Nota, Vaccinazioni, idOperaio, idStalla)
-    VALUES (?, ?, ?, ?)
-  `;
-
-  conn.query(insertMuccaQuery, [Nota, Vaccinazioni, idOperaio, idStalla], (err, result) => {// Esegue query (se non definito operaio = null)
-    if (err) {
-      console.error("Errore inserimento mucca:", err);
-      return res.status(500).json({ success: false });
-    }
-
-    const idNuovaMucca = result.insertId;
-
-    const insertQuotidianaQuery = `
-      INSERT INTO Quotidiana (idAnimale, idOperaio, Data, Pulizia, Mungitura1, Mungitura2, Alimentazione)
-      VALUES (?, ?, ?, 0, 0, 0, 0)
+    const query = `
+      SELECT 
+        S.ID as idStalla,
+        S.Posizione as posizioneStalla,
+        A.ID as ID,
+        A.Nota,
+        A.Vaccinazioni,
+        A.idOperaio,
+        U2.NomeUtente as NomeOperaio
+      FROM Gestione G
+      JOIN Stalla S ON G.idStalla = S.ID
+      LEFT JOIN Animale A ON A.idStalla = S.ID
+      LEFT JOIN Utente U2 ON A.idOperaio = U2.ID
+      WHERE G.IdGestore = ?
     `;
 
-    conn.query(insertQuotidianaQuery, [idNuovaMucca, idOperaio, dataOggi], (err2) => { 
-      if (err2) {
-        console.error("Errore creazione mansione quotidiana:", err2);
+    conn.query(query, [idUtente], (err, results) => {
+      if (err) {
+        console.error("Errore nella query mucche-gestore:", err);
+        return res.status(500).json({ error: 'Errore interno server' });
+      }
+
+      if (!results || results.length === 0) {
+        return res.status(404).json({ error: 'Nessun dato trovato per questo gestore' });
+      }
+
+      const mucche = results.filter(r => r.ID !== null);
+      const idStalla = results[0].idStalla || null;
+      const posizioneStalla = results[0].posizioneStalla || '';
+
+      res.json({ mucche, idStalla, posizioneStalla });
+    });
+  });
+
+// ---------------------//OPERAI-IN-STALLA        (Elenco operai disponibili per riassegnare mucche)----------------------
+  app.get('/gestore-pag-mucche/operai-in-stalla/:idStalla', (req, res) => {
+    const { idStalla } = req.params;
+
+    const query = `
+      SELECT 
+        U.ID, 
+        U.NomeUtente,
+        COUNT(A.ID) AS numMucche
+      FROM Utente U
+      LEFT JOIN Animale A ON A.idOperaio = U.ID
+      WHERE 
+        U.idStalla = ? 
+        AND U.Ruolo = 'operaio'
+        AND U.Disattivato = 0
+      GROUP BY U.ID
+    `;
+
+    conn.query(query, [idStalla], (err, results) => {
+      if (err) {
+        console.error("Errore nella query operai-stalla:", err);
+        return res.status(500).json({ error: 'Errore interno server' });
+      }
+
+      res.json({ operai: results });
+    });
+  });
+
+// --------------------- //ORE-LAVORATE          (Recupera ore lavorate oggi dal gestore)----------------------
+  app.get('/gestore-pag-mucche/ore-lavorate/:idUtente', (req, res) => {
+    const idUtente = req.params.idUtente;
+    const dataOggi = getDataOdierna();
+
+    const query = `
+      SELECT OraIngresso
+      FROM Cartellino
+      WHERE idUtente = ? AND DATE(Data) = ?
+    `;
+
+    conn.query(query, [idUtente, dataOggi], (err, result) => {
+      if (err) {
+        console.error('Errore caricamento oraIngresso:', err);
+        return res.status(500).json({ error: 'Errore server' });
+      }
+
+      const riga = result[0];
+      res.json({ oraIngresso: riga?.OraIngresso || null });
+    });
+  });
+
+// -------------------- /AGGIUNGI-MUCCA         (POP-UP Aggingi Mucca) ---------------------
+  app.post('/gestore-pag-mucche/aggiungi-mucca', (req, res) => {
+    const { Nota, Vaccinazioni, idOperaio, idStalla } = req.body; //carica dati inseriti nel form
+    const dataOggi = getDataOdierna(); // per ora hardcoded
+
+    const insertMuccaQuery = `
+      INSERT INTO Animale (Nota, Vaccinazioni, idOperaio, idStalla)
+      VALUES (?, ?, ?, ?)
+    `;
+
+    conn.query(insertMuccaQuery, [Nota, Vaccinazioni, idOperaio, idStalla], (err, result) => {// Esegue query (se non definito operaio = null)
+      if (err) {
+        console.error("Errore inserimento mucca:", err);
         return res.status(500).json({ success: false });
       }
 
-      res.json({ success: true }); //Risponde al frontend
+      const idNuovaMucca = result.insertId;
+
+      const insertQuotidianaQuery = `
+        INSERT INTO Quotidiana (idAnimale, idOperaio, Data, Pulizia, Mungitura1, Mungitura2, Alimentazione)
+        VALUES (?, ?, ?, 0, 0, 0, 0)
+      `;
+
+      conn.query(insertQuotidianaQuery, [idNuovaMucca, idOperaio, dataOggi], (err2) => { 
+        if (err2) {
+          console.error("Errore creazione mansione quotidiana:", err2);
+          return res.status(500).json({ success: false });
+        }
+
+        res.json({ success: true }); //Risponde al frontend
+      });
     });
   });
-});
   
-// ------------------ GestorePagMucche.jsx --> /MODIFICA-MUCCA                (POP-UP Modifica Dati Mucca : modifica i dati di una mucca)------------------
-  app.post('/modifica-mucca', (req, res) => {
+// -------------------- /MODIFICA-MUCCA          (POP-UP Modifica Dati Mucca)---------------------
+  app.post('/gestore-pag-mucche/modifica-mucca', (req, res) => {
   const { idMucca, Nota, Vaccinazioni, idOperaio } = req.body;
-  const dataOggi = '2025-01-01'; // hardcoded per ora
+  const dataOggi = getDataOdierna(); // hardcoded per ora
 
   // Recupera i dati attuali della mucca
   const getQuery = `SELECT Nota, Vaccinazioni, idOperaio FROM Animale WHERE ID = ?`;
@@ -993,11 +1029,10 @@ app.post('/aggiungi-mucca', (req, res) => {
       });
     });
   });
-});
+  });
 
-
-// ------------------ GestorePagMucche.jsx --> /ELIMINA-MUCCA                  (POP-UP Elimina Mucca : elimina una mucca dal DB)
-  app.post('/elimina-mucca', (req, res) => {
+// -------------------- /ELIMINA-MUCCA            (POP-UP Elimina Mucca)---------------------
+  app.post('/gestore-pag-mucche/elimina-mucca', (req, res) => {
     const { idMucca } = req.body; 
   
     const query =  //Cancella uma mucca dal DB
@@ -1015,39 +1050,32 @@ app.post('/aggiungi-mucca', (req, res) => {
   });
 
 
-
-
-
-
-
-
-
-
-
-
 // HOMEDIRETTORE.JSX
-// ----------------- HomeDirettore.jsx --> /HOME-DIRETTORE                   (Per ottenere i dati riassuntivi dell'intera azienda) -----------------
-  app.get('/home-direttore', (req, res) => {
-    const data = '2025-01-01'; // hardcoded
+// ------------------- /STATO-AZIENDA     (Ottiene i dati riassuntivi dell'intera azienda) -----------------
+  app.get('/home-direttore/stato-azienda', (req, res) => {
+    const data = getDataOdierna(); // hardcoded
 
     const produzioneLatteQuery =  // Calcolare produzione odierna di latte (1 mungitura = 13 litri)
     `SELECT 
-        SUM ((CASE WHEN Mungitura1 = 1 THEN 13 ELSE 0 END) + 
-            (CASE WHEN Mungitura2 = 1 THEN 13 ELSE 0 END)) AS latte
-      FROM Quotidiana
-      WHERE DATE(Data) = ?`;
+      SUM ((CASE WHEN Mungitura1 = 1 THEN 13 ELSE 0 END) + 
+          (CASE WHEN Mungitura2 = 1 THEN 13 ELSE 0 END)) AS latte
+    FROM Quotidiana
+    WHERE DATE(Data) = ? AND idAnimale IS NOT NULL
+    `;
 
     const consumoMangimeQuery =  // Calcolare consumo odierno di mangime (1 alimentazione = 45kg)
     `SELECT 
-        SUM(CASE WHEN Alimentazione = 1 THEN 45 ELSE 0 END) AS mangime
-      FROM Quotidiana
-      WHERE DATE(Data) = ?`;
+      SUM(CASE WHEN Alimentazione = 1 THEN 45 ELSE 0 END) AS mangime
+    FROM Quotidiana
+    WHERE DATE(Data) = ? AND idAnimale IS NOT NULL
+    `;
 
     const gradoPuliziaQuery =   // Calcolare grado di pulizia 
     `SELECT 
-        (SUM(CASE WHEN Pulizia = 1 THEN 1 ELSE 0 END) / COUNT(*)) * 100 AS pulizia
-      FROM Quotidiana
-      WHERE DATE(Data) = ?`;
+      (SUM(CASE WHEN Pulizia = 1 THEN 1 ELSE 0 END) / COUNT(*)) * 100 AS pulizia
+    FROM Quotidiana
+    WHERE DATE(Data) = ? AND idAnimale IS NOT NULL
+    `;
 
     const costoManodoperaQuery = // Calcolare costo manodopera giornaliero (Operaio:112 , Gestore:205)
     `SELECT 
@@ -1112,9 +1140,9 @@ app.post('/aggiungi-mucca', (req, res) => {
     });
   });
 
-// ----------------- HomeDirettore.jsx --> /HOME-DIRETTORE/STALLE             (Per ottenere i dati relativi alle singole stalle)-----------------
-  app.get('/home-direttore/stalle', (req, res) => {
-  const data = '2025-01-01'; // hardcoded
+// ----------------- /SINGOLE-STALLE            (Ottiene i dati relativi alle singole stalle)-----------------
+  app.get('/home-direttore/singole-stalle', (req, res) => {
+  const data = getDataOdierna(); // hardcoded
 
   const query = // Recupera ID Stalla , Nome Gestore , ID Gestore
   `SELECT S.ID AS idStalla, U.NomeUtente AS nomeGestore, U.ID AS idGestore
@@ -1189,30 +1217,26 @@ app.post('/aggiungi-mucca', (req, res) => {
 
     processaStalla(0);
   });
-});
-
-// ----------------- HomeDirettore.jsx --> /COMUNICA-GESTORE                  (Inserire Comunicazione del Direttore nel DB)-----------------
-  app.post('/comunica-gestore', (req, res) => {  //attende messaggio da frontend
-    const { idMittente, idDestinatario, testo } = req.body; // carica da corpo messaggio i dati
-    const data = '2025-01-01'; // hardcoded
-    const stato = 0;
-
-    const query = //Per inserire nuova istanza in tabella Comunicazione
-      `INSERT INTO Comunicazione (Testo, Stato, idMittente, idDestinatario, DataInvio)
-      VALUES (?, ?, ?, ?, ?)`;
-
-    //Esegue la query
-    conn.query(query, [testo, stato, idMittente, idDestinatario, data], (err) => {
-      if (err) {
-        console.error('Errore invio comunicazione', err);
-        return res.status(500).json({ success: false }); // se va tutto bene manda success al frontend
-      }
-      res.json({ success: true });
-    });
   });
 
+// ----------------- /INVIA-COMUNICAZIONE             (Inserire Comunicazioni nel DB)-----------------
+  app.post('/home-direttore/invia-comunicazione', (req, res) => {
+  const { idMittente, idDestinatario, testo } = req.body;
+  const data = new Date(); 
+  const stato = 0;
 
+  const query = `
+    INSERT INTO Comunicazione (Testo, Stato, idMittente, idDestinatario, DataInvio)
+    VALUES (?, ?, ?, ?, ?)`;
 
+  conn.query(query, [testo, stato, idMittente, idDestinatario, data], (err) => {
+    if (err) {
+      console.error('Errore invio comunicazione', err);
+      return res.status(500).json({ success: false });
+    }
+    res.json({ success: true });
+  });
+  });
 
 
 // AVVIO SERVER EXPRESS
