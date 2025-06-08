@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react'; //hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
 import { useNavigate } from 'react-router-dom'; //hook per navigare fra le pagine 
 import '../../style/HomeOperaio.css'; 
+import { SERVER_URL } from '../../config';
+import { calcolaTempoTrascorso } from '../../utils/utilsFrontend';
+
+
+
 
 
 function HomeOperaio() {
@@ -9,7 +14,6 @@ function HomeOperaio() {
   const idUtente = localStorage.getItem('idUtente');
   const [oraIngresso, setOraIngresso] = useState(null);
   const [tempoLavorato, setTempoLavorato] = useState('00:00');
-  const [oreLavoro, setOreLavoro] = useState('0');
   const [capiBestiame, setCapiBestiame] = useState([]);
   const [mansioniAccessorie, setMansioniAccessorie] = useState([]);
   const [segnalazione, setSegnalazione] = useState('');
@@ -27,25 +31,20 @@ function HomeOperaio() {
   
   // Calcola le ore lavorate in giornata per aggiornare il counter (aggiorna ogni minuto)
   useEffect(() => {
-    if (!oraIngresso) return; // se non c'e oraIngresso returna nulla .
-      const aggiornaTempoLavorato = () => {
-      const inizio = new Date(oraIngresso);
+    if (!oraIngresso) return;
 
-      if (isNaN(inizio.getTime())) return; // se orario non e' valido returna nulla .
-
-      const adesso = new Date();
-      const diffSec = Math.floor((adesso - inizio) / 1000); //calcola secondi passati
-      const ore = String(Math.floor(diffSec / 3600)).padStart(2, '0'); //conversione ore 
-      const min = String(Math.floor((diffSec % 3600) / 60)).padStart(2, '0'); //conversione minuti
-
-      setTempoLavorato(`${ore}:${min}`);
+    const aggiornaTempo = () => {
+      const tempo = calcolaTempoTrascorso(oraIngresso);
+      setTempoLavorato(tempo);
     };
 
-    aggiornaTempoLavorato(); // calcola subito il tempo lavorato 
-    const timer = setInterval(aggiornaTempoLavorato, 60000); // aggiorna ogni minuto 
+    aggiornaTempo(); // calcolo iniziale
+    const timer = setInterval(aggiornaTempo, 60000); // aggiorna ogni minuto
 
     return () => clearInterval(timer);
   }, [oraIngresso]);
+
+
 
   
 
@@ -56,7 +55,7 @@ function HomeOperaio() {
   //Carica dati relativi l'operaio (ore lavorate , quotidiane , mansioni accessorie)
   const fetchData = async () => {
     try {
-      const res = await fetch(`http://localhost:3001/home-operaio/${idUtente}`);
+      const res = await fetch(`${SERVER_URL}/home-operaio/dati-operaio/${idUtente}`);
       const data = await res.json(); //carica dati da json
       setOraIngresso(data.oraIngresso);
       setCapiBestiame(data.capiBestiame);
@@ -69,7 +68,7 @@ function HomeOperaio() {
   // Carica nome del gestore dell'operaio 
   const fetchNomeGestore = async () => {
     try {
-      const res = await fetch(`http://localhost:3001/home-operaio/gestore/${idUtente}`);
+      const res = await fetch(`${SERVER_URL}/home-operaio/nome-gestore/${idUtente}`);
       if (!res.ok) throw new Error("Errore nella richiesta");
       const data = await res.json(); //carica dati da json
       setNomeGestore(data.NomeGestore);
@@ -81,7 +80,7 @@ function HomeOperaio() {
   // TABELLA QUOTIDIANE : Quando si preme su una quotidiana si aggiorna il DB e si aggiorna la tabella quotidiane 
   const toggleMansione = async (idQuotidiana, campo, valore) => {
     try {
-      await fetch('http://localhost:3001/update-quotidiana', {
+      await fetch(`${SERVER_URL}/home-operaio/aggiorna-quotidiane`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -99,7 +98,7 @@ function HomeOperaio() {
   const spuntaMansioneAccessoria = async (idComunicazione, statoAttuale) => {
     const nuovoStato = statoAttuale === 1 ? 0 : 1;
     try {
-      await fetch('http://localhost:3001/segna-mansione-accessoria', {
+      await fetch(`${SERVER_URL}/home-operaio/aggiorna-mansione-accessoria`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idComunicazione, nuovoStato })
@@ -111,13 +110,13 @@ function HomeOperaio() {
     }
   };
   
-// INVIA UNA SEGNALAZIONE : Inserisce in DB una segnaalzione , passando da server 
+// INVIA UNA SEGNALAZIONE : Inserisce in DB una segnalazione , passando da server 
   const inviaSegnalazione = async () => {
     if (!segnalazione.trim()) { //controlla se la text area e' vuota
     alert("Non è stato scritto nessun messaggio da inviare.");
     return;}
     try {
-      const res = await fetch('http://localhost:3001/invia-segnalazione', {
+      const res = await fetch(`${SERVER_URL}/home-operaio/invia-segnalazione`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idMittente: idUtente, testo: segnalazione })
