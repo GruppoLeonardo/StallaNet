@@ -4,7 +4,7 @@ const mysql = require('mysql2'); // 2 = pacchetto piu' moderno e asincrono
 const conn = mysql.createConnection({
   host: 'localhost',
   user: 'root',
-  password: 'SQLitps2324Gio', 
+  password: 'Password_del_tuo_DB', 
   database: 'StallaNet'
 });
 
