@@ -1,0 +1,215 @@
+
+.home-container {
+  max-width: 1100px;
+  margin: 40px auto;
+  padding: 30px;
+  background-color: #fdfaf5;
+  border: 2px solid #e2dac2;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(141, 119, 81, 0.1);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #3d321e;
+}
+
+.home-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  font-size: 18px;
+  color: #4a3b23;
+  background-color: #f0e8d8;
+  padding: 12px 20px;
+  border-radius: 8px;
+  border: 1px solid #ddd0b5;
+}
+
+h3 {
+  color: #5d4826;
+  margin-top: 30px;
+  margin-bottom: 12px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 20px;
+  background-color: #fffdf9;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.04);
+}
+
+th, td {
+  padding: 12px;
+  border: 1px solid #d3c6a6;
+  text-align: center;
+  font-size: 15px;
+}
+
+th {
+  background-color: #f2ecd8;
+  font-weight: bold;
+}
+
+td {
+  background-color: #faf8f3;
+  cursor: pointer;
+}
+
+td:hover {
+  background-color: #e7f3d9;
+}
+
+textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #c0b38d;
+  border-radius: 8px;
+  background-color: #fffdf7;
+  resize: vertical;
+  margin-bottom: 4px;
+}
+
+button {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+
+
+
+.segnalazione-actions {
+  margin-top: 10px;
+}
+
+.termina-turno-container {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 40px;
+}
+
+.termina-turno-button {
+  background-color: #c0392b;
+  color: white;
+  font-weight: bold;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.termina-turno-button:hover {
+  background-color: #a93226;
+}
+
+.invia-button {
+  background-color: #2980b9;
+  color: white;
+  font-weight: bold;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 0px; 
+}
+
+.invia-button:hover {
+  background-color: #216a94;
+}
+
+td:hover {
+  background-color: #e7f3d9;
+}
+
+td.no-hover:hover {
+  background-color: inherit;
+  cursor: default;
+}
+
+.tabella-scroll {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid #d3c6a6;
+  border-radius: 8px;
+}
+
+@media (max-width: 768px) {  /*Schermo telefono*/
+  .home-container {
+    margin: 8px;
+    padding: 12px;
+    border: none;
+    box-shadow: none;
+  }
+
+  .home-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 14px;
+    padding: 10px;
+  }
+
+  table {
+    font-size: 13px;
+  }
+
+  th, td {
+    padding: 8px;
+  }
+
+  textarea {
+    font-size: 14px;
+  }
+
+  .termina-turno-button,
+  .invia-button {
+    width: 100%;
+    padding: 14px;
+    font-size: 15px;
+  }
+
+  .tabella-scroll {
+    max-height: 220px;
+    overflow-x: auto;
+  }
+
+  .segnalazione-actions {
+    display: flex;
+    justify-content: center;
+  }
+
+   .termina-turno-container {
+    margin-top: 24px;
+    border-top: 1px solid #ccc;
+    padding-top: 16px;
+  }
+
+  .invia-button {
+    margin-bottom: 12px;
+  }
+
+  td input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  accent-color: #2980b9; /* colore blu coerente con il bottone */
+  cursor: pointer;
+}
+
+td {
+  padding: 16px; /* aumenta spazio cliccabile */
+  font-size: 16px;
+  font-weight: bold;
+}
+
+/* Rendi la riga intera più alta */
+table tr {
+  height: 52px;
+}
+}

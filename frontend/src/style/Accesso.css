@@ -1,0 +1,163 @@
+
+.page-container {
+  background-color: #f8f5eb; 
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+.page-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  justify-content: center; /* allinea verticalmente */
+  align-items: center;     /* allinea orizzontalmente */
+  background-color: #f8f5eb;
+}
+
+/* Header: StallaNet + slogan */
+.header {
+  text-align: center;
+  padding: 30px 20px 10px;
+}
+
+.header h1 {
+  font-size: 100px;
+  color: #5e4b2c;
+  margin: 0;
+  font-weight: bold;
+  text-shadow: 1px 1px #e0d6be;
+}
+
+.header p {
+  font-size: 30px;
+  color: #7c6c4d;
+  margin-top: 8px;
+  font-style: italic;
+}
+
+/* Box login */
+.accesso-container {
+  max-width: 420px;
+  margin: 0 ;
+  padding: 40px;
+  background-color: #fefdf9;
+  border: 2px solid #e0dccd;
+  border-radius: 14px;
+  box-shadow: 0 6px 20px rgba(144, 119, 86, 0.15);
+  text-align: center;
+  background-size: cover;
+  background-blend-mode: lighten;
+}
+
+.accesso-container h2 {
+  margin-bottom: 24px;
+  font-size: 26px;
+  font-weight: bold;
+  color: #5e4b2c;
+}
+
+.accesso-container input {
+  width: 100%;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid #bcae98;
+  border-radius: 10px;
+  font-size: 16px;
+  background-color: #fffefb;
+  transition: border-color 0.3s ease;
+}
+
+.accesso-container input:focus {
+  outline: none;
+  border-color: #8da853;
+  box-shadow: 0 0 6px rgba(141, 168, 83, 0.4);
+}
+
+.accesso-container button {
+  width: 100%;
+  padding: 12px;
+  background-color: #8da853;
+  border: none;
+  border-radius: 10px;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.accesso-container button:hover {
+  background-color: #6e893d;
+}
+
+.accesso-container p {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #b00020;
+}
+
+/* Footer */
+.footer {
+  margin-top: auto;
+  text-align: center;
+  padding: 20px 10px 30px;
+  color: #7a6d53;
+  border-top: 1px solid #d4c8b5;
+  background-color: #f9f5e8;
+  font-size: 14px;
+  font-style: italic;
+}
+
+@media (max-width: 768px) {
+    .page-container {
+    min-height: auto; /* non forzare l'altezza completa dello schermo */
+    justify-content: flex-start; /* contenuto in alto */
+    padding: 16px;
+  }
+
+  .header h1 {
+    font-size: 48px;
+  }
+
+  .header p {
+    font-size: 18px;
+    margin-top: 6px;
+  }
+
+  .accesso-container {
+    width: 100%;
+    box-sizing:border-box;
+    padding: 20px;
+    margin: 20px;
+    box-shadow: none;
+    border-radius: 10px;
+  }
+
+  .accesso-container h2 {
+    font-size: 22px;
+  }
+
+  .accesso-container input {
+    width :100% ;
+    box-sizing: border-box;
+    font-size: 14px;
+    padding: 10px 14px;
+  }
+
+  .accesso-container button {
+    font-size: 15px;
+    padding: 12px;
+  }
+
+  .accesso-container p {
+    font-size: 13px;
+  }
+
+  .footer {
+    margin-top:30px;
+    font-size: 13px;
+    padding: 10px 5px;
+    border-top:none;
+  }
+}

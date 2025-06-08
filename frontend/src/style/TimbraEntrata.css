@@ -1,0 +1,85 @@
+
+.timbra-container {
+    max-width: 500px;
+    margin: 80px auto;
+    padding: 40px;
+    background-color: #fcf8ef;
+    border: 2px solid #dcd2b6;
+    border-radius: 14px;
+    box-shadow: 0 6px 20px rgba(141, 119, 81, 0.1);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    text-align: center;
+    color: #3d321e;
+  }
+  
+  .timbra-container h2 {
+    font-size: 28px;
+    margin-bottom: 10px;
+    color: #5e4b2c;
+  }
+  
+  .timbra-container p {
+    font-size: 16px;
+    margin-bottom: 20px;
+  }
+  
+  .timbra-container p.red-alert {
+    color: #c0392b;
+    font-weight: bold;
+  }
+  
+  .timbra-container button {
+    padding: 12px 20px;
+    margin: 10px 8px;
+    font-size: 16px;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+  }
+  
+  .timbra-container button:hover {
+    opacity: 0.9;
+    transform: scale(1.02);
+  }
+  
+  .timbra-container button:first-of-type {
+    background-color: #7aa348; /* SI */
+    color: white;
+  }
+  
+  .timbra-container button:last-of-type {
+    background-color: #c0392b; /* NO */
+    color: white;
+  }
+  
+@media (max-width: 768px) {
+  .timbra-container {
+    margin: 300px 16px 20px 16px;  /* aumenta lo spazio sopra */
+    padding: 20px;
+    border: none;
+    box-shadow: none;
+    border-radius: 10px;
+  }
+
+  .timbra-container h2 {
+    font-size: 22px;
+    margin-bottom: 12px;
+  }
+
+  .timbra-container p {
+    font-size: 14px;
+    margin-bottom: 18px;
+  }
+
+  .timbra-container button {
+    width: 100%;
+    padding: 14px;
+    font-size: 15px;
+    margin: 8px 0;
+  }
+}
+
+
+

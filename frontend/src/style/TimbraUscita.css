@@ -1,0 +1,78 @@
+
+.uscita-container {
+    max-width: 500px;
+    margin: 80px auto;
+    padding: 40px;
+    background-color: #f9f6ed;
+    border: 2px solid #d7cdb1;
+    border-radius: 14px;
+    box-shadow: 0 6px 20px rgba(115, 98, 61, 0.15);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    text-align: center;
+    color: #3b2f1c;
+  }
+  
+  .uscita-container h2 {
+    font-size: 24px;
+    margin-bottom: 16px;
+    color: #4e3a1c;
+  }
+  
+  .uscita-container p {
+    font-size: 16px;
+    margin-bottom: 20px;
+  }
+  
+  .uscita-container button {
+    padding: 12px 22px;
+    margin: 10px 10px;
+    font-size: 16px;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+  }
+  
+  .uscita-container button:hover {
+    opacity: 0.9;
+    transform: scale(1.02);
+  }
+  
+  .uscita-container button:first-of-type {
+    background-color: #7aa348; /* SI */
+    color: white;
+  }
+  
+  .uscita-container button:last-of-type {
+    background-color: #c0392b; /* NO */
+    color: white;
+  }
+  
+
+@media (max-width: 768px) {
+  .uscita-container {
+    margin: 420px 16px 20px 16px; /* aumentato margine superiore */
+    padding: 24px;
+    border-radius: 10px;
+    box-shadow: none;
+  }
+
+  .uscita-container h2 {
+    font-size: 20px;
+    margin-bottom: 12px;
+  }
+
+  .uscita-container p {
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+
+  .uscita-container button {
+    width: 100%;
+    padding: 14px;
+    font-size: 15px;
+    margin: 8px 0;
+  }
+}
+

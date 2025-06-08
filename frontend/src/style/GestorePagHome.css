@@ -1,0 +1,106 @@
+/* Intera pagina */
+.gestore-container {
+  padding: 20px;
+  font-family: Arial, sans-serif;
+}
+  
+/* Barra superiore */
+.gestore-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+
+.gestore-sinistra { /* Per staccare Nome Utente */
+  flex: 1;
+}
+.gestore-destra { /* da "Ore lavorate oggi:" e "Termina Turno" */
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+/* Nome del gestore */
+.gestore-nome {
+  font-size: 18px;
+}
+
+/* Ore lavorate oggi */
+.gestore-ore {
+  font-size: 16px;
+  margin-right: 20px;
+}
+
+/* Pulsante "Termina Turno" */
+.gestore-termina-turno {
+  background-color: red;
+  color: white;
+  font-weight: bold;
+  border: none;
+  padding: 10px 20px;
+  cursor: pointer;
+}
+
+/* Selettore pagine (Home/Operai/Mucche) */
+.gestore-nav {
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+.gestore-nav button {
+  margin-right: 10px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  border: 2px solid gray;
+}
+.gestore-nav .attivo {
+  border: 2px solid black; /* evidenzia bordo pagina attuale */
+}  
+
+/* Tabelle */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+th, td {
+  border: 1px solid #ccc;
+  padding: 8px;
+  text-align: center;
+}
+
+/* Titoli sezioni */
+h3 {
+  margin-top: 30px;
+  margin-bottom: 10px;
+}
+
+/* Filtro Partner (Fornitori/Sanitari) */
+.gestore-filtri button {
+  margin-right: 10px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  border: 2px solid gray;
+}
+.gestore-filtri .attivo { /*Evidenzia quello attivo*/
+  border: 2px solid black;
+}
+
+.emoji-email {
+  background: none;
+  border: none;
+  font-size: 30px; /* aumenta la dimensione */
+  cursor: pointer;
+  padding: 0;
+}
+
+.tabella-scroll {
+  max-height: 300px; 
+  overflow-y: auto;
+  border: 1px solid #d3c6a6;
+  border-radius: 8px;
+}
+
+
