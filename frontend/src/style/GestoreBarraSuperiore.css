@@ -1,0 +1,54 @@
+/* Barra superiore */
+.gestore-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Parte sinistra: Nome del gestore */
+.gestore-sinistra {
+  flex: 1;
+}
+
+.gestore-nome {
+  font-size: 18px;
+}
+
+/* Parte destra: Ore lavorate e tasto termina turno */
+.gestore-destra {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.gestore-ore {
+  font-size: 16px;
+  margin-right: 20px;
+}
+
+.gestore-termina-turno {
+  background-color: red;
+  color: white;
+  font-weight: bold;
+  border: none;
+  padding: 10px 20px;
+  cursor: pointer;
+}
+
+/* Barra di navigazione (sotto la barra top) */
+.gestore-nav {
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+.gestore-nav button {
+  margin-right: 10px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  border: 2px solid gray;
+}
+
+.gestore-nav .attivo {
+  border: 2px solid black; /* evidenzia pagina attuale */
+}
