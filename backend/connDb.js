@@ -1,11 +1,11 @@
-const mysql = require('mysql2'); // 2 = pacchetto piu' moderno e asincrono
+const mysql = require('mysql2'); // mysql2 = pacchetto piu' moderno e asincrono
 
  // CONNESSIONE DATABASE
 const conn = mysql.createConnection({
-  host: 'localhost',
+  host: 'nome_host',
   user: 'root',
-  password: 'Password_del_tuo_DB', 
-  database: 'StallaNet'
+  password: 'password', 
+  database: 'nome_database',
 });
 
 // Attiva connessione Database

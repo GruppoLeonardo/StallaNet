@@ -1,3 +1,7 @@
+// contiene funzioni di utilità relative alla gestione degli orari per il server
+
+
+// restituisce la data odierna in formato yyyy-mm-dd
 function getDataOdierna() {
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -6,6 +10,7 @@ function getDataOdierna() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+// restituisce l'orario attuale in formato hh:mm:ss
 function getOraAttuale() {
   const now = new Date();
   const hh = String(now.getHours()).padStart(2, '0');
@@ -14,12 +19,14 @@ function getOraAttuale() {
   return `${hh}:${mm}:${ss}`;
 }
 
+// converte un numero di minuti in un orario in formato hh:mm 
 function formattaDurata(minutiTotali) {
   const ore = String(Math.floor(minutiTotali / 60)).padStart(2, '0');
   const minuti = String(minutiTotali % 60).padStart(2, '0');
   return `${ore}:${minuti}`;
 }
 
+// resttituisce una quantità di tempo in formato hh:mm (differenza tra orario attuale e orario in entrata)
 function calcolaTempoTrascorsoOperai(orarioIngresso) {
   if (!orarioIngresso) return "00:00";
   const [hh, mm, ss] = orarioIngresso.split(":").map(Number);
@@ -30,6 +37,7 @@ function calcolaTempoTrascorsoOperai(orarioIngresso) {
   return formattaDurata(diffMinuti);
 }
 
+// differenza tra due orari, risultato in formato hh:mm
 function calcolaDifferenzaOrari(inizioStr, fineStr) {
   const [hhI, mmI, ssI] = inizioStr.split(":").map(Number);
   const [hhF, mmF, ssF] = fineStr.split(":").map(Number);
@@ -41,6 +49,7 @@ function calcolaDifferenzaOrari(inizioStr, fineStr) {
   return formattaDurata(diffMinuti);
 }
 
+// rende le dunzioni chiamabili da altri file
 module.exports = {
   getDataOdierna,
   getOraAttuale,

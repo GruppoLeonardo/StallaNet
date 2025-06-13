@@ -1,8 +1,16 @@
 const express = require('express'); // creare API REST , HTTP
+process.env.TZ = 'Europe/Rome';
 const mysql = require('mysql2'); // 2 = pacchetto piu' moderno e asincrono
 const cors = require('cors'); // Blocca/Permette richieste da altri domini o porte (3001+5173) 
 const bodyParser = require('body-parser'); // Per leggere JSON dentro ai POST 
+const bcrypt = require('bcrypt'); // fare l'hashing delle password
+const cookieParser = require('cookie-parser'); // leggere ed analizzare l'header dei cookie in ogni richiesta http
+const jwt = require('jsonwebtoken'); //per generare e analizzare i JWT
 
+const JWT_SECRET = 'StallaNetSegreta123';  // Chiave per firmare i JWT
+const NODE_ENV = 'development';  // ambiente di esecuzione
+
+//Carica le varie utility
 const {
   getDataOdierna,
   getOraAttuale,
@@ -11,90 +19,167 @@ const {
   calcolaDifferenzaOrari
 } = require('./utils');
 
-require('./tasks/scheduler');
-const conn = require('./connDb');// crea ad attiva la connessione al database
+require('./tasks/scheduler'); // Per creare cartellini e quotidiane a mezzanotte
 
-const app = express(); // crea istanza express (per usare app.get() , app.post()...)
-app.use(cors());
-app.use(bodyParser.json());
+const conn = require('./connDb');// Crea ad attiva la connessione al database
+
+const app = express(); // crea istanza express 
+
+app.use(cors({
+ origin: ['http://nome_host:5173', 'http://IPv4:5173'],  //Domini frontend abilitati
+  credentials: true  //permette l'invio dei cookie di autenticazione
+}));
+
+app.use(bodyParser.json()); // abilita lettura del body dei JSON  
+app.use(cookieParser()); // abilita la lettura dei cookie 
+
+//MIDDLEWARE VerificaToken : per proteggere le rotte private nel backend , analizza cookie e vede se c'e JWT valido , se si , da accesso alla rotta. 
+function verificaToken(req, res, next) {
+  const token = req.cookies.access_token; //Legge il JWT dal cookie
+  //Se token mancante o utente non autenticato : 401
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'Token mancante' });
+  }
+  //Verifica validita del token usando la chiave segreta
+  try {
+    const payload = jwt.verify(token,JWT_SECRET);
+    req.utente = payload; // decodifica il contentuto e lo salva cosi sara' disponibile nelle rotte
+    next(); // passa controllo alla rotta successiva
+  } catch (err) { 
+    return res.status(401).json({ success: false, error: 'Token non valido o scaduto' });
+  }
+}
+
+//--------------------------------------------------------- ROTTE HTTP ----------------------------------------------------------------------------------- 
+ 
+// TOKEN
+// -------------------- /INFORMAZIONI-UTENTE (Recupera i dati utente dal token JWT) ------------------
+  app.get('/informazioni-utente', verificaToken, (req, res) => { //usa il middleware verificaToken
+    const utente = req.utente;
+
+    res.json({
+      success: true,
+      utente: {
+        ID: utente.ID,
+        NomeUtente: utente.NomeUtente,
+        Ruolo: utente.Ruolo,
+        idStalla: utente.idStalla || null // solo se presente
+      }
+    });
+  });
+
+//--------------------- /LOGOUT       (Rotta per la rimozione del cookie) --------------------------------------
+  app.post('/logout', (req, res) => {
+    res.clearCookie('access_token', { // cancella acces_token
+      httpOnly: true,
+      secure: NODE_ENV === 'production',
+      sameSite: 'Strict'
+    });
+    res.json({ success: true });
+  });
 
 
 //ACCESSO.JSX
-// -------------------- /ACCESSO   (Login utente, verifica credenziali, definizione ruolo e stato del cartellino)----------------------
+// -------------------- /ACCESSO   (Login utente, stato del cartellino e creazione JWT)----------------------
   app.post('/accesso', (req, res) => {
-    const { nomeUtente, password } = req.body; //metti in costanti dati JSON arrivati da frontend 
+    const { nomeUtente, password } = req.body; 
 
-    //Query per trovare utente che sta accedendo.
-    const utenteQuery = 
-    `SELECT * FROM Utente 
-    WHERE NomeUtente = ? AND Psw = ? AND Disattivato = 0`;
+    // Cerca l'utente con quel nome e che non sia disattivato
+    const utenteQuery = `
+      SELECT * FROM Utente 
+      WHERE NomeUtente = ? AND Disattivato = 0
+    `;
 
-    // Controlla se utente e' presente in database
-    conn.query(utenteQuery, [nomeUtente, password], (err, results) => {
+    conn.query(utenteQuery, [nomeUtente], (err, results) => {
+      //Se non trova nulla
       if (err) return res.status(500).json({ error: 'Errore server' });
       if (results.length === 0) {
         return res.status(401).json({ error: 'Credenziali errate' });
-    }
-
-      const utente = results[0]; // Array Dati Utente trovato
-
-      // Controlla se e' Direttore
-      if (utente.Ruolo === 'direttore') { 
-        return res.json({
-          success: true,
-          ruolo: 'direttore',
-          idUtente: utente.ID
-        });
       }
 
-      const oggi = getDataOdierna(); //hardcoded 
+      const utente = results[0]; // Array dati Utente trovato
 
-      const cartellinoQuery = `
-        SELECT * FROM Cartellino
-        WHERE idUtente = ? AND Data = ?
-      `;
+      // Confronto della password in chiaro con password hashata
+      bcrypt.compare(password, utente.Psw, (errBcrypt, isMatch) => {
+        if (errBcrypt) return res.status(500).json({ error: 'Errore bcrypt' });
+        if (!isMatch) return res.status(401).json({ error: 'Credenziali errate' });
 
-      // Trova cartellino odierno dell'utente
-      conn.query(cartellinoQuery, [utente.ID, oggi], (err2, cartellinoResults) => {
-        if (err2) return res.status(500).json({ error: 'Errore cartellino' });
-
-        if (cartellinoResults.length === 0) {
-          return res.status(400).json({ error: 'Nessun cartellino trovato per oggi' });
+        // Crea payload JWT
+        const payload = {
+          ID: utente.ID,
+          NomeUtente: utente.NomeUtente,
+          Ruolo: utente.Ruolo
+        };
+        if (utente.Ruolo === 'operaio') {
+          payload.idStalla = utente.idStalla;  // Solo per operai : mette nel token idStalla 
         }
+        //CREA E FIRMA IL JWT
+        const token = jwt.sign(payload, JWT_SECRET);
 
-        const cartellino = cartellinoResults[0]; // Array dati Cartellino trovato 
-        
-        //Logica di indirizzamento basta su Cartellino
 
-        //TURNO NON INIZIATO
-        if (!cartellino.OraIngresso && !cartellino.OraUscita) {
+        // IMPOSTAZIONE DEL COOKIE SICURO
+        res.cookie('access_token', token, { 
+          httpOnly: true, // non accessibile tramite JavaScript
+          secure: NODE_ENV === 'production', // mandati solo tramite https in produzione
+          sameSite: 'Strict' // non si invia cookie a siti esterni
+        });
+
+        // Controllo : se Direttore allora bypassa logica cartellino
+        if (utente.Ruolo === 'direttore') { 
           return res.json({
-            success: true,
-            ruolo: utente.Ruolo,
-            idUtente: utente.ID,
-            stato: 'timbraEntrata'
-          });
-        }
-        //TURNO INIZIATO
-        if (cartellino.OraIngresso && !cartellino.OraUscita) {
-          return res.json({
-            success: true,
-            ruolo: utente.Ruolo,
-            idUtente: utente.ID,
-            stato: 'turnoAttivo'
-          });
-        }
-        //TURNO GIA' FINITO
-        if (cartellino.OraIngresso && cartellino.OraUscita) {
-          return res.json({
-            success: true,
-            ruolo: utente.Ruolo,
-            idUtente: utente.ID,
-            stato: 'turnoTerminato'
-          });
+          success: true, 
+          ruolo: 'direttore'
+        });
         }
 
-        res.status(500).json({ error: 'Stato cartellino non gestito' });
+        const oggi = getDataOdierna(); 
+
+        //Cercare cartellino di oggi per utente appena loggato 
+        const cartellinoQuery = `
+          SELECT * FROM Cartellino
+          WHERE idUtente = ? AND Data = ?
+        `;
+
+        // Esegue la query
+        conn.query(cartellinoQuery, [utente.ID, oggi], (err2, cartellinoResults) => {
+          if (err2) return res.status(500).json({ error: 'Errore cartellino' });
+
+          if (cartellinoResults.length === 0) {
+            return res.status(400).json({ error: 'Nessun cartellino trovato per oggi' });
+          }
+
+          const cartellino = cartellinoResults[0]; // Array dati Cartellino trovato 
+
+          // Logica di indirizzamento basata su Cartellino:
+          // TURNO NON INIZIATO
+          if (!cartellino.OraIngresso && !cartellino.OraUscita) {
+            return res.json({
+              success: true,
+              ruolo: utente.Ruolo,
+              idUtente: utente.ID,
+              stato: 'timbraEntrata'
+            });
+          }
+          // TURNO INIZIATO
+          if (cartellino.OraIngresso && !cartellino.OraUscita) {
+            return res.json({
+              success: true,
+              ruolo: utente.Ruolo,
+              idUtente: utente.ID,
+              stato: 'turnoAttivo'
+            });
+          }
+          // TURNO GIÀ FINITO
+          if (cartellino.OraIngresso && cartellino.OraUscita) {
+            return res.json({
+              success: true,
+              ruolo: utente.Ruolo,
+              idUtente: utente.ID,
+              stato: 'turnoTerminato'
+            });
+          }
+          res.status(500).json({ error: 'Stato cartellino non gestito' });
+        });
       });
     });
   });
@@ -102,46 +187,51 @@ app.use(bodyParser.json());
 
 //TIMBRAENTRATA.JSX
 // -------------------- /TIMBRA-INGRESSO   (Segna OraIngresso in Cartellino) ----------------------
-  app.post('/timbra-ingresso', (req, res) => {
-    const {idUtente} = req.body; //id utente
+  app.post('/timbra-ingresso', verificaToken, (req, res) => {
+
+    const idUtente = req.utente.ID;  // prende l'id dal JWT
+
     const ora = getOraAttuale();
-    const data = getDataOdierna(); // hardoded 
+    const data = getDataOdierna(); 
+    console.log("ID dal token:", req.utente.ID);
 
-    const updateQuery = 
-    `UPDATE Cartellino
-    SET OraIngresso = ?
-    WHERE idUtente = ? AND Data = ?`;
+    //Aggiorna OraIngresso solo se e' ancora NULL
+    const updateQuery = `
+      UPDATE Cartellino
+      SET OraIngresso = ?
+      WHERE idUtente = ? AND Data = ? AND OraIngresso IS NULL
+    `;
 
-    //Per capire se va mandato a : /HomeOperaio o /GestorePagHome.
-    const ruoloQuery = 
-    `SELECT Ruolo FROM Utente 
-    WHERE ID = ?`;
-    
-    //Segna OraIngresso
-    conn.query(updateQuery, [ora, idUtente, data], (err) => {
-      if (err) return res.status(500).json({ success: false });
-
-      //Manda a TimbraEntrata il ruolo
-      conn.query(ruoloQuery, [idUtente], (err2, results) => {
-        if (err2 || results.length === 0) return res.status(500).json({ success: false });
-        res.json({ success: true, ruolo: results[0].Ruolo });
-      });
+    //Esegue query
+    conn.query(updateQuery, [ora, idUtente, data], (err, result) => {
+      if (err) {
+        console.error("Errore nella timbratura:", err);
+        return res.status(500).json({ success: false });
+      }
+      if (result.affectedRows === 0) { // se nessuna riga e' stata aggiornata : o cartellino non esiste o OraIngresso era gia compilata
+        return res.status(400).json({ success: false, error: "Nessun cartellino aggiornato" });
+      }
+      // Ruolo preso dal token JWT (già disponibile)
+      const ruolo = req.utente.Ruolo;
+      res.json({ success: true, ruolo });
     });
   });
 
 
 //TIMBRAUSCITA.JSX
 // -------------------- /ORE-LAVORATE    (Calcola ore lavorate da mostrare in uscita) --------------------         
-  app.get('/timbra-uscita/ore-lavorate/:idUtente', (req, res) => {
-  const idUtente = req.params.idUtente;
+  app.get('/timbra-uscita/ore-lavorate/', verificaToken, (req, res) => {
+  const idUtente = req.utente.ID;
   const data = getDataOdierna();
 
+  //Ottiene OraIngresso dal cartellino di oggi
   const query = `
     SELECT OraIngresso
     FROM Cartellino
     WHERE idUtente = ? AND DATE(Data) = ?
   `;
 
+  //Esegue query
   conn.query(query, [idUtente, data], (err, result) => {
     if (err) {
       console.error('Errore nel calcolo minuti lavorati:', err);
@@ -157,55 +247,102 @@ app.use(bodyParser.json());
     const oggi = getDataOdierna();
     const ingresso = new Date(`${oggi}T${oraIngresso}`);
 
-    const diffMs = now - ingresso;
+    const diffMs = now - ingresso; // calcola differenza tra OraIngresso e Adesso
+    //converte in hh:mm
     const diffMinuti = Math.max(Math.floor(diffMs / 60000), 0);
     const ore = String(Math.floor(diffMinuti / 60)).padStart(2, '0');
     const minuti = String(diffMinuti % 60).padStart(2, '0');
 
-    res.json({ oreLavoro: `${ore}:${minuti}` });
+    res.json({ oreLavoro:`${ore}:${minuti}`});
   });
   });
 
 // -------------------- /TIMBRA-USCITA    (Segna OraUscita in Cartellino) -----------------
-  app.post('/timbra-uscita', (req, res) => {
-    const { idUtente } = req.body;
-    const ora = getOraAttuale(); // hardcoded
-    const data = getDataOdierna(); // hardcoded
-  
-    const query = `
+  app.post('/timbra-uscita', verificaToken, (req, res) => {
+    const idUtente = req.utente.ID;
+    const ora = getOraAttuale();
+    const data = getDataOdierna();
+
+    //Segna OraUscita nel cartellino di oggi , solo se e' NULL
+    const updateQuery = `
       UPDATE Cartellino
       SET OraUscita = ?
-      WHERE idUtente = ? AND Data = ?
+      WHERE idUtente = ? AND Data = ? AND OraUscita IS NULL
     `;
-  
-    conn.query(query, [ora, idUtente, data], (err) => {
+
+    conn.query(updateQuery, [ora, idUtente, data], (err, result) => {
       if (err) {
-        console.error('Errore durante la timbratura di uscita', err);
+        console.error("Errore timbratura uscita:", err);
         return res.status(500).json({ success: false });
       }
+
+      if (result.affectedRows === 0) {
+        return res.status(400).json({ success: false, error: 'Nessun cartellino aggiornato' });
+      }
+
       res.json({ success: true });
     });
   });
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 //HOMEOPERAIO.JSX
 // --------------------- /DATI-OPERAIO    (Carica Mansioni Quotidiane/Accessorie dell'operaio)-----------------
-  app.get('/home-operaio/dati-operaio/:idUtente', (req, res) => {
-  const idUtente = req.params.idUtente;
-  const data = getDataOdierna();
+  app.get('/home-operaio/dati-operaio/', verificaToken, (req, res) => {
+  const idUtente = req.utente.ID; // recupero id utente dal JWT
+  const data = getDataOdierna(); // recupero data odierna in formato yyyy-mm-dd
 
+  // recupera l’orario di ingresso dell’operaio nel giorno corrente.
   const cartellinoQuery = `
     SELECT OraIngresso
     FROM Cartellino
     WHERE idUtente = ? AND DATE(Data) = ?
   `;
-
+  
+  // recupera le mansioni giornaliere sugli animali assegnate all’operaio
   const bestiameQuery = `
     SELECT Q.ID, Q.idAnimale, Q.Pulizia, Q.Mungitura1, Q.Mungitura2, Q.Alimentazione
     FROM Quotidiana Q
     WHERE Q.idOperaio = ? AND DATE(Q.Data) = ?
   `;
 
+  // recupera le comunicazioni inviate oggi all’operaio da utenti con ruolo gestore
   const accessorieQuery = `
     SELECT ID, Testo, Stato
     FROM Comunicazione
@@ -214,27 +351,30 @@ app.use(bodyParser.json());
     )
   `;
 
-  const finalResponse = {};
+  const finalResponse = {}; // conterrà la risposta da inviare al frontend
 
   conn.query(cartellinoQuery, [idUtente, data], (err, cartResult) => {
-    if (err) return res.status(500).json({ error: 'Errore cartellino' });
+    if (err) return res.status(500).json({ error: 'Errore cartellino' }); // se c’è errore nel DB, ritorna errore 500
 
-    const oraIngresso = cartResult[0]?.OraIngresso || null;
-    finalResponse.oraIngresso = oraIngresso;
+    const oraIngresso = cartResult[0]?.OraIngresso || null; // estrae OraIngresso o null
+    finalResponse.oraIngresso = oraIngresso; 
 
+    // calcola quanti minuti sono passati da oraIngresso fino ad ora
     if (oraIngresso) {
       const ingresso = new Date(`${data}T${oraIngresso}`);
       const now = new Date();
       const diffMinuti = Math.max(Math.floor((now - ingresso) / 60000), 0);
-      finalResponse.oreLavoro = formattaDurata(diffMinuti);
+      finalResponse.oreLavoro = formattaDurata(diffMinuti); // formatta la risposta in hh:mm
     } else {
-      finalResponse.oreLavoro = "00:00";
+      finalResponse.oreLavoro = "00:00"; // se oraIngresso è assente, inserisci 00:00
     }
 
+    // recupera le mucche e le mansioni assegnate all’operaio oggi
     conn.query(bestiameQuery, [idUtente, data], (err2, bestiameResult) => {
       if (err2) return res.status(500).json({ error: 'Errore bestiame' });
       finalResponse.capiBestiame = bestiameResult;
 
+      // recupera tutte le comunicazioni dal gestore all’operaio per oggi
       conn.query(accessorieQuery, [idUtente, data], (err3, accessorieResult) => {
         if (err3) return res.status(500).json({ error: 'Errore accessorie' });
         finalResponse.mansioniAccessorie = accessorieResult;
@@ -246,9 +386,10 @@ app.use(bodyParser.json());
   });
 
 // --------------------- /NOME-GESTORE   (Recupera il Gestore dell'operaio) -----------------
-  app.get('/home-operaio/nome-gestore/:idUtente', (req, res) => {
-    const { idUtente } = req.params;
+  app.get('/home-operaio/nome-gestore/', verificaToken, (req, res) => {
+    const idUtente = req.utente.ID; // recupero id utente dal JWT
 
+    // recupero del nome del gestore associato all'operaio
     const query = `
       SELECT u.NomeUtente AS NomeGestore
       FROM Utente o
@@ -260,11 +401,13 @@ app.use(bodyParser.json());
     `;
 
     conn.query(query, [idUtente], (err, rows) => {
+      // se si verifica un errore nel recupero
       if (err) {
         console.error('Errore nel recupero del gestore:', err);
         return res.status(500).json({ message: "Errore interno del server" });
       }
 
+      // se non è stato trovato nessun gestore associato
       if (rows.length === 0) {
         return res.status(404).json({ message: "Gestore non trovato" });
       }
@@ -275,7 +418,7 @@ app.use(bodyParser.json());
   
 // --------------------- /AGGIORNA-QUOTIDIANE    (Aggiornare la tabella delle Mansioni Quotidiane)-----------------
   app.post('/home-operaio/aggiorna-quotidiane', (req, res) => {
-    const { idQuotidiana, campo, valore } = req.body;
+    const { idQuotidiana, campo, valore } = req.body; // estrae i dati dal corpo della richiesta
   
     // Protezione: Si possono aggiornare solo i 4 campi
     const campiValidi = ['Pulizia', 'Mungitura1', 'Mungitura2', 'Alimentazione'];
@@ -290,7 +433,7 @@ app.use(bodyParser.json());
     conn.query(query, [valore, idQuotidiana], (err) => {
       if (err) {
         console.error('Errore MySQL:', err);
-        return res.status(500).json({ success: false });
+        return res.status(500).json({ success: false }); // in caso di errore manda un generico errore 500
       }
       res.json({ success: true });
     });
@@ -298,26 +441,31 @@ app.use(bodyParser.json());
 
 // --------------------- /AGGIORNA-MANSIONE-ACCESSORIA    (Aggiornare le Mansioni accessorie)-----------------
   app.post('/home-operaio/aggiorna-mansione-accessoria', (req, res) => {
-    const { idComunicazione, nuovoStato } = req.body;
+    const { idComunicazione, nuovoStato } = req.body; // estrae i dati dal corpo della richiesta
 
+    // query per aggiornare lo stato della comunicazione specificata
     const query = 
     `UPDATE Comunicazione SET Stato = ? WHERE ID = ?`;
 
-    //Trova la comunicazione , se casella si aggiorna , manda true alle checkbox.
+    // trova la comunicazione , se casella si aggiorna , manda true alle checkbox.
     conn.query(query, [nuovoStato, idComunicazione], (err) => {
       if (err) {
+        // in caso di errore nel DB
         console.error('Errore aggiornamento comunicazione:', err);
         return res.status(500).json({ success: false });
       }
+      // se l'aggiornamento è andato a buon fine
       console.log(`✓ Stato comunicazione ${idComunicazione} aggiornato a ${nuovoStato}`);
       res.json({ success: true });
     });
   });
 
 // --------------------- /INVIA-SEGNALAZIONE          (Segna la comunicazione al Gestore)-----------------
-  app.post('/home-operaio/invia-segnalazione', (req, res) => {
-    const { idMittente, testo } = req.body;
-    const data = new Date(); // hardcoded 
+  app.post('/home-operaio/invia-segnalazione', verificaToken, (req, res) => {
+    const idMittente = req.utente.ID; // estrae ID dell'operaio dal JWT
+    const { testo } = req.body;  // estrae il contenuto del messaggio dal corpo della richiesta
+
+    const data = new Date(); // si ottiene data ed orario attuali
   
     // Capire in che stalla lavora l'operaio
     const getStallaQuery = 
@@ -334,7 +482,7 @@ app.use(bodyParser.json());
   
       const idStalla = stallaResult[0].idStalla;
       
-      // Trovare Gestore della stalla
+      // trovare il Gestore della stalla
       const getGestoreQuery = `
         SELECT IdGestore FROM Gestione
         WHERE idStalla = ?
@@ -342,6 +490,7 @@ app.use(bodyParser.json());
       
       conn.query(getGestoreQuery, [idStalla], (err2, gestoreResult) => {
         if (err2 || gestoreResult.length === 0) {
+          // in caso di errore dal DB
           console.error('Errore recupero gestore', err2);
           return res.status(500).json({ success: false });
         }
@@ -356,91 +505,98 @@ app.use(bodyParser.json());
   
         conn.query(insertQuery, [testo, idMittente, idDestinatario, data], (err3) => {
           if (err3) {
+            // in caso di errore dal DB
             console.error('Errore inserimento comunicazione', err3);
             return res.status(500).json({ success: false });
           }
-  
+
+          // se va bene manda true a HomeOperaio
           console.log(`✓ Segnalazione inviata da ${idMittente} a ${idDestinatario}`);
-          res.json({ success: true }); // Se va bene manda true a HomeOperaio
+          res.json({ success: true }); 
         });
       });
     });
   });
+
+
+//GESTOREBARRASUPERIORE.JSX 
+// --------------------- /BARRA-SUPERIORE/ORARIO-INGRESSO        (Recupera ora di ingresso del gestore)---------------------
+app.get('/barra-superiore/orario-ingresso/:idUtente', (req, res) => {
+  const { idUtente } = req.params; // estrae il contenuto del messaggio dal corpo della richiesta
+  const data = getDataOdierna(); // recupero della data odierna (yyyy-mm-dd)
+
+  // recupero dell'OraIngresso del cartellino odierno del gestore
+  const query = `
+    SELECT OraIngresso
+    FROM Cartellino
+    WHERE idUtente = ? AND DATE(Data) = ?
+  `;
+
+  conn.query(query, [idUtente, data], (err, result) => {
+    if (err) {
+      // in caso di errore dal DB
+      console.error("Errore orario ingresso barra superiore:", err);
+      return res.status(500).json({ error: 'Errore server' });
+    }
+
+    const ora = result[0]?.OraIngresso || null; // se presente inserisci OraIngresso, altrimenti null
+    res.json({ oraIngresso: ora });
+  });
+});
 
 
 // GESTOREPAGHOME.JSX
-// --------------------- /GESTORE-PAG-HOME           (Mostra ore lavorate,visualizzare comunicazioni,vedere e filtrare i Partner) -----------------
+// --------------------- /GESTORE-PAG-HOME           (Mostra ore lavorate, visualizzare comunicazioni, vedere e filtrare i Partner) -----------------
   app.get('/gestore-pag-home/:idUtente', (req, res) => {
-    const idUtente = req.params.idUtente;
-    const data = getDataOdierna(); // usa la data odierna reale
-    const ruoloPartner = req.query.ruoloPartner || 'fornitore';
+  const idUtente = req.params.idUtente; // estrae l'ID del gestore dalla URL
+  const data = getDataOdierna(); // ottiene la data odierna in formato YYYY-MM-DD
+  const ruoloPartner = req.query.ruoloPartner || 'fornitore'; // estrare ruoloPartner, per default è fornitore
 
-    const oreQuery = `
-      SELECT OraIngresso, OraUscita
-      FROM Cartellino
-      WHERE idUtente = ? AND DATE(Data) = ?
-    `;
+  // ottiene comunicazioni ricevute dal gestore nella data odierna
+  const comunicazioniQuery = `
+    SELECT ID, Testo, Stato
+    FROM Comunicazione
+    WHERE idDestinatario = ? AND DATE(DataInvio) = ?
+  `;
 
-    const comunicazioniQuery = `
-      SELECT ID, Testo, Stato
-      FROM Comunicazione
-      WHERE idDestinatario = ? AND DATE(DataInvio) = ?
-    `;
+  // ottiene i partner associati al gestore, filtrati per ruolo 
+  const partnerQuery = `
+    SELECT P.ID, P.Nominativo, P.Descrizione, P.Telefono , P.Email
+    FROM Partner P
+    JOIN Corrispondenza C ON C.idPartner = P.ID
+    WHERE C.idGestore = ? AND P.Ruolo = ?
+  `;
 
-    const partnerQuery = `
-      SELECT P.ID, P.Nominativo, P.Descrizione, P.Telefono , P.Email
-      FROM Partner P
-      JOIN Corrispondenza C ON C.idPartner = P.ID
-      WHERE C.idGestore = ? AND P.Ruolo = ?
-    `;
+  const result = {}; // conterrà la risposta finale da inviare al frontend
 
-    const result = {};
+  conn.query(comunicazioniQuery, [idUtente, data], (err2, commRes) => {
+    if (err2) return res.status(500).json({ error: 'Errore comunicazioni' });
 
-    conn.query(oreQuery, [idUtente, data], (err, oreRes) => {
-      if (err) return res.status(500).json({ error: 'Errore ore' });
+    // salva le comunicazioni nel risultato
+    result.comunicazioni = commRes;
 
-      const oraIngresso = oreRes[0]?.OraIngresso;
-      const oraUscita = oreRes[0]?.OraUscita;
+    conn.query(partnerQuery, [idUtente, ruoloPartner], (err3, partnerRes) => {
+      if (err3) return res.status(500).json({ error: 'Errore contatti' });
 
-      result.oraIngresso = oraIngresso || null; // 👈 AGGIUNTO
-
-      if (!oraIngresso) {
-        result.oreLavoro = "00:00";
-      } else {
-        const inizio = new Date(`${data}T${oraIngresso}`);
-        const fine = oraUscita ? new Date(`${data}T${oraUscita}`) : new Date();
-        const diffMinuti = Math.max(Math.floor((fine - inizio) / 60000), 0);
-        const ore = String(Math.floor(diffMinuti / 60)).padStart(2, '0');
-        const minuti = String(diffMinuti % 60).padStart(2, '0');
-        result.oreLavoro = `${ore}:${minuti}`;
-      }
-
-      conn.query(comunicazioniQuery, [idUtente, data], (err2, commRes) => {
-        if (err2) return res.status(500).json({ error: 'Errore comunicazioni' });
-
-        result.comunicazioni = commRes;
-
-        conn.query(partnerQuery, [idUtente, ruoloPartner], (err3, partnerRes) => {
-          if (err3) return res.status(500).json({ error: 'Errore contatti' });
-
-          result.contatti = partnerRes;
-          res.json(result);
-        });
-      });
+      // salva i partner nel risultato
+      result.contatti = partnerRes;
+      res.json(result);
     });
   });
+});
 
 // --------------------- /AGGIORNA-LETTURA            (Aggiorna in DB le modifiche fatte alla tabella Comunicazioni) -----------------
   app.post('/gestore-pag-home/aggiorna-lettura', (req, res) => {
-    const { idComunicazione, nuovoStato } = req.body; // riceve valori
+    const { idComunicazione, nuovoStato } = req.body; // estrae i dati dal corpo della richiesta 
   
-    const query = // aggiorna la comunicazione
+    // aggiorna lo stato della comunicazione
+    const query = 
     `UPDATE Comunicazione SET Stato = ?
     WHERE ID = ?`;
   
     conn.query(query, [nuovoStato, idComunicazione], (err) => {
       if (err) return res.status(500).json({ success: false }); // segnala un possibile errore
-      res.json({ success: true }); // manda il risultato in json 
+      res.json({ success: true }); // manda il risultato in JSON
     });
   });
 
@@ -448,8 +604,9 @@ app.use(bodyParser.json());
 // GESTOREPAGOPERAI.JSX
 //--------------------- /STALLA-DEL-GESTORE        (recupera la stalla affidata al Gestore)----------------------
   app.get('/gestore-pag-operai/stalla-del-gestore/:idGestore', (req, res) => {
-  const idGestore = req.params.idGestore;
+  const idGestore = req.params.idGestore; // estrae l'ID della stalla dai parametri dell' URL
 
+  // cerca la stalla associata al gestore specificato
   const query = `
     SELECT idStalla
     FROM Gestione
@@ -459,12 +616,13 @@ app.use(bodyParser.json());
 
   conn.query(query, [idGestore], (err, results) => {
     if (err) {
+      // in caso di errore del DB
       console.error('Errore recupero stalla:', err);
       return res.status(500).json({ error: 'Errore server' });
     }
 
     if (results.length === 0) {
-      return res.status(404).json({ error: 'Stalla non trovata' });
+      return res.status(404).json({ error: 'Stalla non trovata' }); // se non viene trovata nessuna stalla associata al gestore
     }
 
     res.json({ idStalla: results[0].idStalla });
@@ -473,9 +631,15 @@ app.use(bodyParser.json());
 
 //--------------------- /OPERAI-IN-STALLA           (recupero Elenco operai assegnati in questa stalla + ore lavorate da ognuno)--------------------- 
   app.get('/gestore-pag-operai/operai-in-stalla/:idStalla', (req, res) => {
-  const idStalla = req.params.idStalla;
-  const dataOggi = getDataOdierna(); // usa data reale
+  const idStalla = req.params.idStalla; // estrae l'ID della stalla dai parametri dell' URL
+  const dataOggi = getDataOdierna(); // ottiene data odierna (yyyy-mm-dd)
 
+  /* query che calcola vari dati giornalieri per ciascun operaio nella stalla:
+      - mansioni svolte (pulizia, mungitura, alimentazione)
+      - comunicazioni completate
+      - orari di ingresso/uscita
+      - totali attesi (di mansioni e comunicazioni)
+  */
   const query = `
     SELECT 
       u.ID AS IdOperaio,
@@ -569,6 +733,7 @@ app.use(bodyParser.json());
       AND u.idStalla = ?
   `;
 
+  // array dei valori da inserire nei punti interrogativi (?) della query
   // Nota: il valore ? viene sostituito *in ordine* quindi va replicato per ogni sottoselezione che usa la data
   const placeholders = [
   dataOggi, // Pulizie
@@ -583,19 +748,21 @@ app.use(bodyParser.json());
   idStalla  // Stalla
   ];
 
-  //per restituire a GestorePagOperai.jsx direttamente le ore lavorate di ogni operaio
+  // esegue la query e restituisce a GestorePagOperai.jsx direttamente le ore lavorate di ogni operaio
   conn.query(query, placeholders, (err, results) => {  
+
+    // per ogni operaio calcola le ore lavorate in formato hh:mm
     const operaiModificati = results.map(operaio => {
       const ingresso = operaio.OraIngresso;
       const uscita = operaio.OraUscita;
 
-      //se non è presente OraIngresso allora OreLavorate = "00:00"
+      // se non è presente OraIngresso allora OreLavorate = "00:00"
       if (!ingresso) {
         operaio.OreLavorate = "00:00";
         return operaio;
       }
 
-      //se è presente OraUscita allora usala per il calcolo
+      // se è presente OraUscita allora usala per il calcolo
       if (uscita) {
         operaio.OreLavorate = calcolaDifferenzaOrari(ingresso, uscita); 
       } else {
@@ -605,40 +772,15 @@ app.use(bodyParser.json());
       return operaio;
     });
 
-    res.json({ operai: operaiModificati });
-  });
-});
-
-//--------------------- /ORARIO-INGRESSO          (recupera le ore lavorate dal Gestore)--------------------- 
-  app.get('/gestore-pag-operai/orario-ingresso/:idUtente', (req, res) => {
-  const { idUtente } = req.params;
-  const dataOggi = getDataOdierna();
-
-  const query = `
-    SELECT OraIngresso
-    FROM Cartellino
-    WHERE idUtente = ? AND DATE(Data) = ?
-    LIMIT 1
-  `;
-
-  conn.query(query, [idUtente, dataOggi], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ message: "Errore server" });
-    }
-
-    if (!rows || rows.length === 0 || !rows[0].OraIngresso) {
-      return res.json({ orarioIngresso: null });
-    }
-
-    const orario = rows[0].OraIngresso.toString(); 
-    res.json({ orarioIngresso: orario });
+    res.json({ operai: operaiModificati }); // risposta al frontend
   });
 });
 
 //---------------------/MUCCHE-IN-STALLA          (recupero mucche assegnate agli operai)--------------------- 
   app.get('/gestore-pag-operai/mucche-in-stalla/:idStalla', (req, res) => {
-    const idStalla = req.params.idStalla;
+    const idStalla = req.params.idStalla; // estrae l'ID della stalla dai parametri dell' URL
 
+    // recupera le mucche e i loro operai associati
     const query = `
     SELECT a.ID, u.NomeUtente AS OperaioCorrente
     FROM Animale a
@@ -649,6 +791,7 @@ app.use(bodyParser.json());
 
     conn.query(query, [idStalla], (err, result) => {
       if (err) {
+        // in caso di errore del DB
         console.error("Errore mucche gestore (by idStalla):", err);
         return res.status(500).json({ error: 'Errore server' });
       }
@@ -656,18 +799,20 @@ app.use(bodyParser.json());
     });
   });
 
-//--------------------- /OPERAI-PER-POPUP           (recupera OPERAI in base alla STALLA (per popup MODIFICA))--------------------- 
+//--------------------- /OPERAI-PER-POPUP-MODIFICA           (recupera OPERAI in base alla STALLA (per popup MODIFICA))--------------------- 
   app.get('/gestore-pag-operai/operai-per-popup-modifica/:idStalla', (req, res) => {
-    const idStalla = req.params.idStalla;
+    const idStalla = req.params.idStalla; // estrae l'ID della stalla dai parametri dell' URL
 
+    // recupera tutti gli operai non disattivati della stalla
     const query = `
-      SELECT ID, NomeUtente, Psw
+      SELECT ID, NomeUtente
       FROM Utente
       WHERE Ruolo = 'operaio' AND Disattivato = 0 AND idStalla = ?
     `;
 
     conn.query(query, [idStalla], (err, results) => {
       if (err) {
+        // in caso di errore del DB
         console.error("Errore recupero operai:", err);
         return res.status(500).json({ error: "Errore server" });
       }
@@ -678,8 +823,9 @@ app.use(bodyParser.json());
 
 //--------------------- /OPERAI-ELIMINABILI       (recupero operai eliminabili)--------------------- 
   app.get('/gestore-pag-operai/operai-eliminabili/:idStalla', (req, res) => {
-    const idStalla = req.params.idStalla;
+    const idStalla = req.params.idStalla; // estrae l'ID della stalla dai parametri dell' URL
 
+    // recupera tutti gli operai non disattivati della stalla
     const query = `
       SELECT ID, NomeUtente
       FROM Utente
@@ -690,6 +836,7 @@ app.use(bodyParser.json());
 
     conn.query(query, [idStalla], (err, results) => {
       if (err) {
+        // in caso di errore del DB
         console.error("Errore recupero operai per eliminazione:", err);
         return res.status(500).json({ error: "Errore server" });
       }
@@ -700,125 +847,175 @@ app.use(bodyParser.json());
 
 //--------------------- /INVIA-MANSIONE-ACCESSORIA      (invio di Mansione Accessoria) --------------------- 
   app.post('/gestore-pag-operai/invia-mansione-accessoria', (req, res) => {
-  const { idMittente, idDestinatario, testo } = req.body;
+    const { idMittente, idDestinatario, testo } = req.body; // estrae i parametri dal corpo della richiesta
 
-  const data = getDataOdierna();
-  const ora = getOraAttuale();
-  const dataOraCompleta = `${data} ${ora}`;  //unione di data e orario
+    const data = getDataOdierna(); // ottiene la data odierna (yyyy-mm-dd)
+    const ora = getOraAttuale(); // ottiene l'orario attuale (hh:mm:ss)
+    const dataOraCompleta = `${data} ${ora}`;  //unione di data e orario
 
-  const insertQuery = `
-    INSERT INTO Comunicazione (Testo, Stato, idMittente, idDestinatario, DataInvio)
-    VALUES (?, 0, ?, ?, ?)
-  `;
-
-  conn.query(insertQuery, [testo, idMittente, idDestinatario, dataOraCompleta], (err, result) => {
-    if (err) {
-      console.error('Errore inserimento mansione accessoria', err);
-      return res.status(500).json({ success: false });
-    }
-    res.json({ success: true });
-  });
-});
-
-//---------------------/AGGIUNGI-OPERAIO           (aggiunta di un nuovo operaio) --------------------- 
-  app.post('/gestore-pag-operai/aggiungi-operaio', (req, res) => {
-  const { nomeUtente, password, mucche, idStalla } = req.body;
-  const dataOggi = getDataOdierna(); //'YYYY-MM-DD'
-
-  if (!nomeUtente || !password || !idStalla) {
-    return res.status(400).json({ success: false, message: 'Dati mancanti.' });
-  }
-
-  const muccheArray = Array.isArray(mucche) ? mucche : [];
-
-  const insertOperaioQuery = `
-    INSERT INTO Utente (NomeUtente, Psw, Ruolo, Disattivato, idStalla)
-    VALUES (?, ?, 'operaio', 0, ?)
-  `;
-
-  conn.query(insertOperaioQuery, [nomeUtente, password, idStalla], (err, result) => {
-    if (err) {
-      console.error("Errore creazione operaio:", err);
-      return res.status(500).json({ success: false });
-    }
-
-    const nuovoID = result.insertId;
-
-    //creazione di un nuovo CARTELLINO per l'operaio aggiunto
-    const insertCartellinoQuery = `
-      INSERT INTO Cartellino (idUtente, Data)
-      VALUES (?, ?)
-    `;
-    conn.query(insertCartellinoQuery, [nuovoID, dataOggi], (err2) => {
-      if (err2) {
-        console.error("Errore inserimento cartellino:", err2);
-      }
-
-      //se non sono state selezione mucche da trasferire
-      if (muccheArray.length === 0) {
-        return res.json({ success: true });
-      }
-
-      //assegnazione mucche e delle loro quotidiane all'operaio
-      const updateMuccheQuery =`UPDATE Animale SET idOperaio = ? WHERE ID = ?`;
-      const updateQuotidianeQuery = `
-        UPDATE Quotidiana SET idOperaio = ?
-        WHERE idAnimale = ? AND DATE(Data) = ?
-      `;
-
-      const updates = muccheArray.map(idMucca => new Promise((resolve, reject) => {
-        conn.query(updateMuccheQuery, [nuovoID, idMucca], (err1) => {
-          if (err1) return reject(err1);
-
-          conn.query(updateQuotidianeQuery, [nuovoID, idMucca, dataOggi], (err2) => {
-            if (err2) return reject(err2);
-            resolve();
-          });
-        });
-      }));
-
-      Promise.all(updates)
-        .then(() => res.json({ success: true }))
-        .catch(error => {
-          console.error("Errore aggiornamento mucche o quotidiane:", error);
-          res.status(500).json({ success: false });
-        });
-    });
-  });
-});
-
-//---------------------/MODIFICA-OPERAIO        (modifica dati di un operaio)
-  app.post('/gestore-pag-operai/modifica-operaio', (req, res) => {
-    const { idOperaio, nuovoNomeUtente, nuovaPassword } = req.body;
-
-    if (!idOperaio || !nuovoNomeUtente || !nuovaPassword) {
-      return res.status(400).json({ success: false, message: 'Dati mancanti per la modifica.' });
-    }
-
-    const query = `
-      UPDATE Utente
-      SET NomeUtente = ?, Psw = ?
-      WHERE ID = ? AND Ruolo = 'operaio'
+    // inserisce una nuova comunicazione nella tabella Comunicazione (stato = 0)
+    const insertQuery = `
+      INSERT INTO Comunicazione (Testo, Stato, idMittente, idDestinatario, DataInvio)
+      VALUES (?, 0, ?, ?, ?)
     `;
 
-    conn.query(query, [nuovoNomeUtente, nuovaPassword, idOperaio], (err, result) => {
+    conn.query(insertQuery, [testo, idMittente, idDestinatario, dataOraCompleta], (err, result) => {
       if (err) {
-        console.error("Errore modifica operaio:", err);
+        // in caso di errore del DB
+        console.error('Errore inserimento mansione accessoria', err);
         return res.status(500).json({ success: false });
       }
-
       res.json({ success: true });
     });
   });
 
+//---------------------/AGGIUNGI-OPERAIO           (aggiunta di un nuovo operaio) --------------------- 
+  app.post('/gestore-pag-operai/aggiungi-operaio', async (req, res) => {
+  const { nomeUtente, password, mucche, idStalla } = req.body; // estrae i parametri dal corpo della richiesta
+  const dataOggi = getDataOdierna(); // ottiene la data odierna (yyyy-mm-dd)
+
+  // controlla che i dati principali siano presenti
+  if (!nomeUtente || !password || !idStalla) {
+    return res.status(400).json({ success: false, message: 'Dati mancanti.' });
+  }
+
+
+  const muccheArray = Array.isArray(mucche) ? mucche : []; // se non sono state selezionate mucche, crea array vuoto
+
+  try {
+    const passwordHashata = await bcrypt.hash(password, 10); // crea l'hash sicuro della password da salvare nel DB
+
+    // inserisce il nuovo operaio nella tabella Utente
+    const insertOperaioQuery = `
+      INSERT INTO Utente (NomeUtente, Psw, Ruolo, Disattivato, idStalla)
+      VALUES (?, ?, 'operaio', 0, ?)
+    `;
+
+    conn.query(insertOperaioQuery, [nomeUtente, passwordHashata, idStalla], (err, result) => {
+      if (err) {
+        // in caso di errore del DB
+        console.error("Errore creazione operaio:", err);
+        return res.status(500).json({ success: false });
+      }
+
+      const nuovoID = result.insertId; // ottiene l'ID del nuovo operaio creato
+
+      // crea un nuovo cartellino odierno per l'operaio appena aggiunto
+      const insertCartellinoQuery = `
+        INSERT INTO Cartellino (idUtente, Data)
+        VALUES (?, ?)
+      `;
+      conn.query(insertCartellinoQuery, [nuovoID, dataOggi], (err2) => {
+        if (err2) {
+          // in caso di errore del DB, continua
+          console.error("Errore inserimento cartellino:", err2);
+        }
+
+        // se non sono state selezione mucche da trasferire, termina con successo
+        if (muccheArray.length === 0) {
+          return res.json({ success: true });
+        }
+
+        // assegnazione mucche e delle loro quotidiane all'operaio
+        const updateMuccheQuery = `UPDATE Animale SET idOperaio = ? WHERE ID = ?`;
+        const updateQuotidianeQuery = `
+          UPDATE Quotidiana SET idOperaio = ?
+          WHERE idAnimale = ? AND DATE(Data) = ?
+        `;
+
+        // Per ogni mucca da assegnare, aggiorna entrambe le tabelle (Animale e Quotidiana)
+        const updates = muccheArray.map(idMucca => new Promise((resolve, reject) => {
+          conn.query(updateMuccheQuery, [nuovoID, idMucca], (err1) => {
+            if (err1) return reject(err1);
+
+            conn.query(updateQuotidianeQuery, [nuovoID, idMucca, dataOggi], (err2) => {
+              if (err2) return reject(err2);
+              resolve();
+            });
+          });
+        }));
+
+         // attende che tutti gli aggiornamenti siano completati
+        Promise.all(updates)
+          .then(() => res.json({ success: true })) // se tutto è andato a buon fine
+          .catch(error => {// errore durante l’aggiornamento di Animale o Quotidiana
+            console.error("Errore aggiornamento mucche o quotidiane:", error);
+            res.status(500).json({ success: false });
+          });
+      });
+    });
+    // messaggio di errore per eventuali problemi nella generazione dell'hash
+  } catch (erroreHash) {
+    console.error("Errore hash password:", erroreHash);
+    return res.status(500).json({ success: false, message: 'Errore interno hash' });
+  }
+  });
+
+//---------------------/MODIFICA-OPERAIO        (modifica dati di un operaio)--------------------------------
+  app.post('/gestore-pag-operai/modifica-operaio', async (req, res) => {
+  const { idOperaio, nuovoNomeUtente, nuovaPassword } = req.body; // estrae i parametri dal corpo della richiesta
+
+  // controllo dei dati obbligatori
+  if (!idOperaio || !nuovoNomeUtente) {
+    return res.status(400).json({ success: false, message: 'Dati mancanti per la modifica.' });
+  }
+
+  try {
+    // se è stata fornita una nuova password hashala e aggiorna anche la password
+    if (nuovaPassword && nuovaPassword.trim() !== '') {
+      const passwordHashata = await bcrypt.hash(nuovaPassword, 10);
+
+      // aggiorna sia il nome utente che la password nella tabella Utent
+      const query = `
+        UPDATE Utente
+        SET NomeUtente = ?, Psw = ?
+        WHERE ID = ? AND Ruolo = 'operaio'
+      `;
+
+      conn.query(query, [nuovoNomeUtente, passwordHashata, idOperaio], (err, result) => {
+        if (err) {
+          // in caso di errore del DB
+          console.error("Errore modifica operaio (nome + password):", err);
+          return res.status(500).json({ success: false });
+        }
+        res.json({ success: true });
+      });
+
+    } else {
+      // solo aggiornamento nome utente se la password resta invariata
+      const query = `
+        UPDATE Utente
+        SET NomeUtente = ?
+        WHERE ID = ? AND Ruolo = 'operaio'
+      `;
+
+      conn.query(query, [nuovoNomeUtente, idOperaio], (err, result) => {
+        if (err) {
+          // in caso di errore del DB
+          console.error("Errore modifica operaio (solo nome):", err);
+          return res.status(500).json({ success: false });
+        }
+        res.json({ success: true });
+      });
+    }
+
+  } catch (errHash) {
+    // in caso di errore nell generazione dell'hash
+    console.error("Errore durante modifica operaio:", errHash);
+    return res.status(500).json({ success: false, message: 'Errore interno durante modifica' });
+  }
+  });
+
 //---------------------/ELIMINA-OPERAIO       (elimina un operaio)
   app.post('/gestore-pag-operai/elimina-operaio', (req, res) => {
-    const { idOperaio } = req.body;
+    const { idOperaio } = req.body; // estrai i dati dal corpo della richiesta 
 
+    // controllo se è stato fornito l'ID
     if (!idOperaio) {
       return res.status(400).json({ success: false, message: 'Operaio non selezionato.' });
     }
 
+    // verifica se l'operaio ha ancora mucche associate
     const checkMuccheQuery = `
       SELECT COUNT(*) AS count
       FROM Animale
@@ -827,10 +1024,12 @@ app.use(bodyParser.json());
 
     conn.query(checkMuccheQuery, [idOperaio], (err, result) => {
       if (err) {
+        // in caso di errore del DB
         console.error("Errore controllo mucche:", err);
         return res.status(500).json({ success: false, message: 'Errore controllo mucche.' });
       }
 
+      // se ci sono ancora mucche assegnate all'operaio, blocca l’eliminazione
       if (result[0].count > 0) {
         return res.status(400).json({
           success: false,
@@ -838,6 +1037,7 @@ app.use(bodyParser.json());
         });
       }
 
+      // disattiva l’operaio impostando il campo "Disattivato" a 1
       const eliminaQuery = `
         UPDATE Utente
         SET Disattivato = 1
@@ -846,6 +1046,7 @@ app.use(bodyParser.json());
 
       conn.query(eliminaQuery, [idOperaio], (err2) => {
         if (err2) {
+          // in caso di errore del DB
           console.error("Errore eliminazione operaio:", err2);
           return res.status(500).json({ success: false, message: 'Errore eliminazione.' });
         }
@@ -859,8 +1060,9 @@ app.use(bodyParser.json());
 // GESTOREPAGMUCCHE.JSX
 // --------------------- /MUCCHE-IN-STALLA        (Trova tutte le mucche presenti nella stalla del Gestore) ----------------------
   app.get('/gestore-pag-mucche/mucche-in-stalla/:idUtente', (req, res) => {
-    const { idUtente } = req.params;
+    const { idUtente } = req.params; // estrae l'ID del gestore dall' URL
 
+    // query per ottenere: l'ID + posizione della stalla gestita, mucche nella stalla + nome operai associati per ogni mucca
     const query = `
       SELECT 
         S.ID as idStalla,
@@ -879,26 +1081,29 @@ app.use(bodyParser.json());
 
     conn.query(query, [idUtente], (err, results) => {
       if (err) {
+        // in caso di errore del DB
         console.error("Errore nella query mucche-gestore:", err);
         return res.status(500).json({ error: 'Errore interno server' });
       }
 
       if (!results || results.length === 0) {
+        // se non ci sono risultati, manda errore 404
         return res.status(404).json({ error: 'Nessun dato trovato per questo gestore' });
       }
+      
+      const mucche = results.filter(r => r.ID !== null); // filtra i risultati per ottenere solo le righe in cui è presente una mucca
+      const idStalla = results[0].idStalla || null; // ottiene idStalla
+      const posizioneStalla = results[0].posizioneStalla || ''; // otiene posizioneStalla
 
-      const mucche = results.filter(r => r.ID !== null);
-      const idStalla = results[0].idStalla || null;
-      const posizioneStalla = results[0].posizioneStalla || '';
-
-      res.json({ mucche, idStalla, posizioneStalla });
+      res.json({ mucche, idStalla, posizioneStalla }); // restituisce lista mucce, id stalla e la sua posizione
     });
   });
 
 // ---------------------//OPERAI-IN-STALLA        (Elenco operai disponibili per riassegnare mucche)----------------------
   app.get('/gestore-pag-mucche/operai-in-stalla/:idStalla', (req, res) => {
-    const { idStalla } = req.params;
+    const { idStalla } = req.params; // estrae l'ID della stalla dai parametri dell' URL
 
+    // query per ottenere id utenti, nomi utente e numero di mucche associate ad ogni operaio attivo
     const query = `
       SELECT 
         U.ID, 
@@ -915,41 +1120,21 @@ app.use(bodyParser.json());
 
     conn.query(query, [idStalla], (err, results) => {
       if (err) {
+        // in caso di errore del DB
         console.error("Errore nella query operai-stalla:", err);
         return res.status(500).json({ error: 'Errore interno server' });
       }
 
-      res.json({ operai: results });
-    });
-  });
-
-// --------------------- //ORE-LAVORATE          (Recupera ore lavorate oggi dal gestore)----------------------
-  app.get('/gestore-pag-mucche/ore-lavorate/:idUtente', (req, res) => {
-    const idUtente = req.params.idUtente;
-    const dataOggi = getDataOdierna();
-
-    const query = `
-      SELECT OraIngresso
-      FROM Cartellino
-      WHERE idUtente = ? AND DATE(Data) = ?
-    `;
-
-    conn.query(query, [idUtente, dataOggi], (err, result) => {
-      if (err) {
-        console.error('Errore caricamento oraIngresso:', err);
-        return res.status(500).json({ error: 'Errore server' });
-      }
-
-      const riga = result[0];
-      res.json({ oraIngresso: riga?.OraIngresso || null });
+      res.json({ operai: results }); // restituisce in un array ogni riga ottenuta dal DB
     });
   });
 
 // -------------------- /AGGIUNGI-MUCCA         (POP-UP Aggingi Mucca) ---------------------
   app.post('/gestore-pag-mucche/aggiungi-mucca', (req, res) => {
-    const { Nota, Vaccinazioni, idOperaio, idStalla } = req.body; //carica dati inseriti nel form
-    const dataOggi = getDataOdierna(); // per ora hardcoded
+    const { Nota, Vaccinazioni, idOperaio, idStalla } = req.body; // estrae i dati dal corpo della richiesta 
+    const dataOggi = getDataOdierna(); // ottiene data odierna (yyyy-mm-dd)
 
+    // query per inserire la nuova mucca nella tabella Animale
     const insertMuccaQuery = `
       INSERT INTO Animale (Nota, Vaccinazioni, idOperaio, idStalla)
       VALUES (?, ?, ?, ?)
@@ -957,12 +1142,14 @@ app.use(bodyParser.json());
 
     conn.query(insertMuccaQuery, [Nota, Vaccinazioni, idOperaio, idStalla], (err, result) => {// Esegue query (se non definito operaio = null)
       if (err) {
+        // in caso di errore del DB
         console.error("Errore inserimento mucca:", err);
         return res.status(500).json({ success: false });
       }
 
-      const idNuovaMucca = result.insertId;
+      const idNuovaMucca = result.insertId; // ottiene l'id della mucca appena inserita
 
+      // query per inserire una nuova quotidiana per la mucca appena inserita nella tabella Quotidiana
       const insertQuotidianaQuery = `
         INSERT INTO Quotidiana (idAnimale, idOperaio, Data, Pulizia, Mungitura1, Mungitura2, Alimentazione)
         VALUES (?, ?, ?, 0, 0, 0, 0)
@@ -970,36 +1157,39 @@ app.use(bodyParser.json());
 
       conn.query(insertQuotidianaQuery, [idNuovaMucca, idOperaio, dataOggi], (err2) => { 
         if (err2) {
+          // in caso di errore del DB
           console.error("Errore creazione mansione quotidiana:", err2);
           return res.status(500).json({ success: false });
         }
 
-        res.json({ success: true }); //Risponde al frontend
+        res.json({ success: true }); // risposta per il frontend
       });
     });
   });
   
 // -------------------- /MODIFICA-MUCCA          (POP-UP Modifica Dati Mucca)---------------------
   app.post('/gestore-pag-mucche/modifica-mucca', (req, res) => {
-  const { idMucca, Nota, Vaccinazioni, idOperaio } = req.body;
-  const dataOggi = getDataOdierna(); // hardcoded per ora
+  const { idMucca, Nota, Vaccinazioni, idOperaio } = req.body; // estrae i dati dal corpo della richiesta
+  const dataOggi = getDataOdierna(); // ottiene la data odierna (yyyy-mm-dd)
 
-  // Recupera i dati attuali della mucca
+  // query per recuperare i dati attuali della mucca
   const getQuery = `SELECT Nota, Vaccinazioni, idOperaio FROM Animale WHERE ID = ?`;
 
   conn.query(getQuery, [idMucca], (err, result) => {
     if (err || result.length === 0) {
+      // in caso di errore del DB
       console.error('Errore nel recupero dati esistenti', err);
       return res.status(500).json({ success: false });
     }
 
-    const attuale = result[0];
+    const attuale = result[0]; // dati attuali della mucca 
 
+    // se i campi ricevuti sono vuoti, mantieni i valori esistenti
     const nuovaNota = Nota !== '' ? Nota : attuale.Nota;
     const nuovaVacc = Vaccinazioni !== '' ? Vaccinazioni : attuale.Vaccinazioni;
     const nuovoOperaio = idOperaio !== '' ? idOperaio : attuale.idOperaio;
 
-    // 1. Aggiorna la tabella Animale
+    // query per aggiornare la tabella Animale
     const updateAnimaleQuery = `
       UPDATE Animale
       SET Nota = ?, Vaccinazioni = ?, idOperaio = ?
@@ -1008,11 +1198,12 @@ app.use(bodyParser.json());
 
     conn.query(updateAnimaleQuery, [nuovaNota, nuovaVacc, nuovoOperaio, idMucca], (err2) => {
       if (err2) {
+        // in caso di errore del DB
         console.error('Errore aggiornamento mucca', err2);
         return res.status(500).json({ success: false });
       }
 
-      // 2. Aggiorna la tabella Quotidiana: cambia idOperaio mantenendo i campi esistenti
+      // query per aggiornare la riga quotidiana, cambia solo idOperaio, i flag rimangono invariati
       const updateQuotidianaQuery = `
         UPDATE Quotidiana
         SET idOperaio = ?
@@ -1021,11 +1212,12 @@ app.use(bodyParser.json());
 
       conn.query(updateQuotidianaQuery, [nuovoOperaio, idMucca, dataOggi], (err3) => {
         if (err3) {
+          // in caso di errore del DB
           console.error('Errore aggiornamento quotidiana', err3);
           return res.status(500).json({ success: false });
         }
 
-        res.json({ success: true });
+        res.json({ success: true }); 
       });
     });
   });
@@ -1033,19 +1225,22 @@ app.use(bodyParser.json());
 
 // -------------------- /ELIMINA-MUCCA            (POP-UP Elimina Mucca)---------------------
   app.post('/gestore-pag-mucche/elimina-mucca', (req, res) => {
-    const { idMucca } = req.body; 
+    const { idMucca } = req.body; // estrae i dati dal corpo della richiesta
   
-    const query =  //Cancella uma mucca dal DB
+    // query per cancellare la mucca dal DB
+    const query =  
       `DELETE FROM Animale
       WHERE ID = ? `;
-  
-    conn.query(query, [idMucca], (err) => { //esegue query
+
+    //manda la query la DB per eseguirla
+    conn.query(query, [idMucca], (err) => { 
       if (err) {
+        // in caso di errore del DB
         console.error('Errore eliminazione mucca', err);
         return res.status(500).json({ success: false });
       }
   
-      res.json({ success: true }); // risponde al frontend
+      res.json({ success: true }); 
     });
   });
 
@@ -1053,9 +1248,10 @@ app.use(bodyParser.json());
 // HOMEDIRETTORE.JSX
 // ------------------- /STATO-AZIENDA     (Ottiene i dati riassuntivi dell'intera azienda) -----------------
   app.get('/home-direttore/stato-azienda', (req, res) => {
-    const data = getDataOdierna(); // hardcoded
+    const data = getDataOdierna();  // ottiene la data odierna in formato yyyy-mm-dd
 
-    const produzioneLatteQuery =  // Calcolare produzione odierna di latte (1 mungitura = 13 litri)
+    // query per calcolare la produzione odierna di latte (1 mungitura = 13 litri)
+    const produzioneLatteQuery =  
     `SELECT 
       SUM ((CASE WHEN Mungitura1 = 1 THEN 13 ELSE 0 END) + 
           (CASE WHEN Mungitura2 = 1 THEN 13 ELSE 0 END)) AS latte
@@ -1063,21 +1259,24 @@ app.use(bodyParser.json());
     WHERE DATE(Data) = ? AND idAnimale IS NOT NULL
     `;
 
-    const consumoMangimeQuery =  // Calcolare consumo odierno di mangime (1 alimentazione = 45kg)
+    // query per calcolare il consumo odierno di mangime (1 alimentazione = 45kg)
+    const consumoMangimeQuery =  
     `SELECT 
       SUM(CASE WHEN Alimentazione = 1 THEN 45 ELSE 0 END) AS mangime
     FROM Quotidiana
     WHERE DATE(Data) = ? AND idAnimale IS NOT NULL
     `;
 
-    const gradoPuliziaQuery =   // Calcolare grado di pulizia 
+    // query per calcolare il grado di pulizia 
+    const gradoPuliziaQuery =   
     `SELECT 
       (SUM(CASE WHEN Pulizia = 1 THEN 1 ELSE 0 END) / COUNT(*)) * 100 AS pulizia
     FROM Quotidiana
     WHERE DATE(Data) = ? AND idAnimale IS NOT NULL
     `;
 
-    const costoManodoperaQuery = // Calcolare costo manodopera giornaliero (Operaio:112 , Gestore:205)
+    // query per calcolare il costo di manodopera giornaliero (Operaio:112 , Gestore:205)
+    const costoManodoperaQuery = 
     `SELECT 
       SUM(CASE WHEN Ruolo = 'operaio' THEN 112 
               WHEN Ruolo = 'gestore' THEN 205 
@@ -1085,23 +1284,26 @@ app.use(bodyParser.json());
       FROM Utente
       WHERE Disattivato = 0`;
 
-    const numOperaiQuery = // Calcola numero operai attivi 
+    // query per calcolare il numero operai attivi 
+    const numOperaiQuery = 
     `SELECT COUNT(*) AS operai
       FROM Utente
       WHERE Ruolo = 'operaio' AND Disattivato = 0`;
 
-    const numGestoriQuery = // Calcola numero gestori attivi 
+    // query per calcolare il numero gestori attivi 
+    const numGestoriQuery = 
       `SELECT COUNT(*) AS gestori
       FROM Utente
       WHERE Ruolo = 'gestore' AND Disattivato = 0`;
 
-    const numBestiameQuery = // Calcolare numero totale di mucche
+    // query per calcolare il numero totale di mucche
+    const numBestiameQuery = 
       `SELECT COUNT(*) AS bestie
       FROM Animale`;
 
-    const result = {}; // raccoglie risultati di tutte query s
+    const result = {}; // raccoglie risultati di tutte le query 
 
-    //Esegue tutte le query in database
+    // esegue tutte le query in modo annidato nel database
     conn.query(produzioneLatteQuery, [data], (err, latteRes) => {
       if (err) return res.status(500).json({ error: 'Errore latte' });
       result.latte = latteRes[0]?.latte || 0;
@@ -1112,7 +1314,7 @@ app.use(bodyParser.json());
 
         conn.query(gradoPuliziaQuery, [data], (err3, puliziaRes) => {
           if (err3) return res.status(500).json({ error: 'Errore pulizia' });
-          result.pulizia = Math.round(puliziaRes[0]?.pulizia || 0);
+          result.pulizia = Math.round(puliziaRes[0]?.pulizia || 0); // arrotonda il valore in percentuale
 
           conn.query(costoManodoperaQuery, (err4, costoRes) => {
             if (err4) return res.status(500).json({ error: 'Errore costo' });
@@ -1142,30 +1344,35 @@ app.use(bodyParser.json());
 
 // ----------------- /SINGOLE-STALLE            (Ottiene i dati relativi alle singole stalle)-----------------
   app.get('/home-direttore/singole-stalle', (req, res) => {
-  const data = getDataOdierna(); // hardcoded
+  const data = getDataOdierna(); // ottiene data odierna in formato yyyy-mm-dd
 
-  const query = // Recupera ID Stalla , Nome Gestore , ID Gestore
+  // recupera tutte le stalle attive, con ID, nome gestore e ID gestore
+  const query = 
   `SELECT S.ID AS idStalla, U.NomeUtente AS nomeGestore, U.ID AS idGestore
     FROM Stalla S
     JOIN Gestione G ON S.ID = G.idStalla
     JOIN Utente U ON G.idGestore = U.ID`;
-
+  
   conn.query(query, (err, stalleRes) => {
     if (err) return res.status(500).json({ error: 'Errore stalle' });
-    const stalle = [];
 
+    const stalle = []; // array finale con i dati aggregati di ogni stalla
+
+    // funzione ricorsiva per processare una stalla alla volta
     const processaStalla = (index) => {
-      if (index >= stalleRes.length) return res.json(stalle);
+      if (index >= stalleRes.length) return res.json(stalle); // finite le stalle, inivia la risposta JSON
 
-      const stalla = stalleRes[index];
+      const stalla = stalleRes[index]; // stalla corrente
       const idStalla = stalla.idStalla;
 
+      // conta quanti operai e quante mucche ci sono nella stalla
       const countQuery = `
         SELECT 
           (SELECT COUNT(*) FROM Utente WHERE Ruolo = 'operaio' AND idStalla = ?) AS numOperai,
           (SELECT COUNT(*) FROM Animale WHERE idStalla = ?) AS numMucche
       `;
 
+      // calcola il progresso sulle mansioni odierne per la stalla
       const progressoQuery = `
       SELECT
         SUM(CASE WHEN Mungitura1 = 1 THEN 1 ELSE 0 END + CASE WHEN Mungitura2 = 1 THEN 1 ELSE 0 END) AS mungiture,
@@ -1184,21 +1391,24 @@ app.use(bodyParser.json());
         conn.query(progressoQuery, [idStalla, data], (err3, progRes) => {
           if (err3) return res.status(500).json({ error: 'Errore progresso stalla' });
 
+          // controllo di protezione da risultati null o vuoti
           const safeProgRes = (!progRes || progRes.length === 0 || progRes[0] === null)
             ? { mungiture: 0, pulizie: 0, alimentazioni: 0, totaleAttese: 0 }
             : progRes[0];
 
+          // estrazione dei valori calcolati o fallback
           const mungiture = safeProgRes.mungiture ?? 0;
           const pulizie = safeProgRes.pulizie ?? 0;
           const alimentazioni = safeProgRes.alimentazioni ?? 0;
           const totaleMungiture = safeProgRes.totaleMungiture ?? 0;
-          const totaleRecord = safeProgRes.totaleRecord ?? 1; // fallback
+          const totaleRecord = safeProgRes.totaleRecord ?? 1; 
 
+          // Calcolo delle percentuali
           const mungituraPerc = totaleMungiture > 0 ? Math.round((mungiture / totaleMungiture) * 100) : 0;
           const puliziaPerc = totaleRecord > 0 ? Math.round((pulizie / totaleRecord) * 100) : 0;
           const alimentazionePerc = totaleRecord > 0 ? Math.round((alimentazioni / totaleRecord) * 100) : 0;
 
-
+           // aggiunta dei dati aggregati alla lista finale
           stalle.push({
             idStalla: stalla.idStalla,
             nomeGestore: stalla.nomeGestore,
@@ -1210,27 +1420,30 @@ app.use(bodyParser.json());
             alimentazione: alimentazionePerc
           });
 
-          processaStalla(index + 1);
+          
+          processaStalla(index + 1); // vai alla prossima stalla
         });
       });
     };
 
-    processaStalla(0);
+    processaStalla(0); // avvia dalla prima stalla
   });
   });
 
 // ----------------- /INVIA-COMUNICAZIONE             (Inserire Comunicazioni nel DB)-----------------
   app.post('/home-direttore/invia-comunicazione', (req, res) => {
-  const { idMittente, idDestinatario, testo } = req.body;
-  const data = new Date(); 
-  const stato = 0;
+  const { idMittente, idDestinatario, testo } = req.body; // estrae i dati dal corpo della richiesta 
+  const data = new Date(); // ottiene data e ora corrente 
+  const stato = 0; // stato iniziale della comunicazione 
 
+  // inserisce una nuova riga nella tabella Comunicazione
   const query = `
     INSERT INTO Comunicazione (Testo, Stato, idMittente, idDestinatario, DataInvio)
     VALUES (?, ?, ?, ?, ?)`;
 
   conn.query(query, [testo, stato, idMittente, idDestinatario, data], (err) => {
     if (err) {
+      // in caso di errore del DB
       console.error('Errore invio comunicazione', err);
       return res.status(500).json({ success: false });
     }
@@ -1239,13 +1452,16 @@ app.use(bodyParser.json());
   });
 
 
-// AVVIO SERVER EXPRESS
+
+// --------------------- AVVIO DEL SERVER EXPRESS ---------------------
+
+
+  // avvia il server Express sulla porta 3001
   app.listen(3001, () => {
     console.log('Server avviato su http://localhost:3001');
   });
 
-// MESSAGGIO DI COLLEGAMENTO A localhost:3001
+  // messaggio di collegamento a localhost:3001
   app.get('/', (req, res) => {
     res.send('StallaNet Backend API attivo 🚜');
   });
-
