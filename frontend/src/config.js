@@ -1,11 +1,12 @@
-const hostname = window.location.hostname;
+//Determina dinamicamente quale indirizzo del backend usare a seconda del dispositivo che si usa.
+const hostname = window.location.hostname; //prende hostname attuale da browser (= dove si trova il frontend)
 
 let SERVER_URL;
 
-if (hostname === 'localhost' || hostname === '127.0.0.1') {
-  SERVER_URL = 'http://localhost:3001'; // localhost per non creare problemi interni 
+if (hostname === 'nome_host' || hostname === 'IPv4_host') {
+  SERVER_URL = 'http://nome_host:3001'; // se apri sito da questo computer 
 } else {
-  SERVER_URL = 'http://172.20.10.4:3001'; // IP del Mac visibile nella rete per entrare da cell 
+  SERVER_URL = 'http://IPv4:3001'; // se apri il sito da smartphone collegato in rete
 }
 
 export { SERVER_URL };

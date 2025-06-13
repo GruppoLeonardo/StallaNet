@@ -1,4 +1,4 @@
-import { StrictMode } from 'react' // Di React , Per scrivere codice compliant  
+import { StrictMode } from 'react' // di React (Per scrivere codice compliant)
 import { createRoot } from 'react-dom/client' // Crea Root dell'App 
 import './index.css'
 import App from './App.jsx' 
