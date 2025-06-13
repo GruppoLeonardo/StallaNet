@@ -1,29 +1,31 @@
-import React, { useEffect, useState } from 'react';//hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
-import { useNavigate } from 'react-router-dom';//hook per navigare fra le pagine 
-import '../../style/GestorePagOperai.css';
-import { SERVER_URL } from '../../config';
-import { calcolaTempoTrascorso } from '../../utils/utilsFrontend';
+import React, { useEffect, useState } from 'react';// useState = gestire stati locali del componente , useEffect = per eseguire codice al caricamento 
+import { useNavigate } from 'react-router-dom';// reindirizzamentti per navigare fra le pagine 
+import '../../style/GestorePagOperai.css'; // stile di pagina
+import { SERVER_URL } from '../../config'; // contiene l'indirizzo url del server Node
 
-
+import GestoreBarraSuperiore from './GestoreBarraSuperiore'; // import del compomente GestoreBarraSuperiore
 
 function GestorePagOperai() {
-  //costanti generali
-  const idUtente = localStorage.getItem('idUtente');
-  const nomeUtente = localStorage.getItem('nomeUtente');
+  // stato utente: ID e nome del gestore (recuperati da JWT)
+  const [idUtente, setIdUtente] = useState(null);
+  const [nomeUtente, setNomeUtente] = useState('');
+
+  // stato generale degli operai e della stalla
   const [operai, setOperai] = useState([]);
   const [idStalla, setIdStalla] = useState(null);
-  const [oreLavoroLive, setOreLavoroLive] = useState("00:00");
-  const [orarioIngresso, setOrarioIngresso] = useState(null);
+
+  
+  const [orarioIngresso, setOrarioIngresso] = useState(null); // orario di ingresso del gestore
 
 
 
-  //costanti per il popup ASSEGNA MANSIONE 
+  // stati per il popup ASSEGNA MANSIONE 
   const [popupAssegnaVisible, setPopupAssegnaVisible] = useState(false);
   const [operaioSelezionato, setOperaioSelezionato] = useState(null);
   const [testoMansione, setTestoMansione] = useState('');
 
 
-  //costanti per il popup AGGIUNGI OPERAIO
+  // stati per il popup AGGIUNGI OPERAIO
   const [popupAggiungiVisibile, setPopupAggiungiVisibile] = useState(false);
   const [nomeNuovoOperaio, setNomeNuovoOperaio] = useState('');
   const [pswNuovoOperaio, setPswNuovoOperaio] = useState('');
@@ -31,26 +33,56 @@ function GestorePagOperai() {
   const [muccheSelezionate, setMuccheSelezionate] = useState([]);
 
 
-  //costanti per il popup MODIFICA OPERAIO
+  // stati per il popup MODIFICA OPERAIO
   const [popupModificaVisibile, setPopupModificaVisibile] = useState(false);
   const [listaOperai, setListaOperai] = useState([]);
   const [modificaNomeUtente, setModificaNomeUtente] = useState('');
   const [modificaPassword, setModificaPassword] = useState('');
 
 
-  //costanti per il popup ELIMINA OPERAIO
+  // stati per il popup ELIMINA OPERAIO
   const [popupEliminaVisibile, setPopupEliminaVisibile] = useState(false);
   const [listaOperaiEliminabili, setListaOperaiEliminabili] = useState([]);
   const [operaioDaEliminare, setOperaioDaEliminare] = useState(null);
 
   const navigate = useNavigate();
 
-  //Fa partire fetchStalla appena parte il componente 
+
+  //------------------------- LOGICA DI GESTOREPAGOPERAI.JSX --------------------------
+
+  // RECUPERO DATI APPENA APERTO IL COMPOMENTE
+
+  // chiamata al server per la lettura dei dati utente presenti nel JWT
   useEffect(() => {
-   fetchStalla(); // solo questo al primo caricamento
+    const fetchUtente = async () => {
+      try {
+        const res = await fetch(`${SERVER_URL}/informazioni-utente`, { 
+          credentials: 'include'
+        }); 
+        const data = await res.json();
+        if (data.success && data.utente?.ID && data.utente?.NomeUtente) { // controllo richiesta a buon fine e presenza di id e nome utente 
+          setIdUtente(data.utente.ID);
+          setNomeUtente(data.utente.NomeUtente);
+        } else {
+          navigate('/'); // se token non valido, ritorna ad Accesso.jsx
+        }
+      } catch (err) {
+        console.error('Errore durante il recupero dati utente', err);
+        navigate('/');
+      }
+    };fetchUtente();
   }, []);
 
-  // Avvalora orarioIngresso recuperando cartellino.OraIngresso appena si carica la pagina
+
+  //Fa partire fetchStalla appena parte il componente (recupero stalla del gestore)
+  useEffect(() => {
+    if (idUtente) {
+      fetchStalla();
+    }
+  }, [idUtente]);
+
+
+  // Avvalora orarioIngresso recuperando cartellino.OraIngresso appena si apre il componente
   useEffect(() => {
     const fetchOrarioIngresso = async () => {
       try {
@@ -67,19 +99,6 @@ function GestorePagOperai() {
     if (idUtente) fetchOrarioIngresso();
   }, [idUtente]);
 
-  // Quando orarioIngresso è disponibile, aggiorna immediatamente oreLavoroLive, poi ogni minuto
-  useEffect(() => {
-    if (!orarioIngresso) return;
-
-    const aggiorna = () => {
-      const aggiornate = calcolaTempoTrascorso(orarioIngresso);
-      setOreLavoroLive(aggiornate);
-    };
-
-    aggiorna(); // calcolo immediato
-    const timer = setInterval(aggiorna, 60000);
-    return () => clearInterval(timer);
-  }, [orarioIngresso]);
 
   //appena è disponibile idStalla carica gli operai e aggiona ogni 5 secondi
   useEffect(() => {
@@ -88,13 +107,18 @@ function GestorePagOperai() {
     fetchOperai(); // esegue subito appena disponibile idStalla
 
     const interval = setInterval(() => {
-      fetchOperai(); // aggiorna ogni 5 secondi
-    }, 5000);
+      fetchOperai(); // aggiornamento  
+    }, 5000); // ogni 5 secondi
 
    return () => clearInterval(interval);
   }, [idStalla]);
 
-  //------------------------- LOGICA DI GESTOREPAGOPERAI.JSX --------------------------
+  
+
+  // FUNZIONI DI RECUPERO DATI
+
+
+
   //recupera idStalla di stalla del gestore
   const fetchStalla = async () => {
     try {
@@ -110,7 +134,7 @@ function GestorePagOperai() {
     }
   };
 
-  //recupera operai che lavorano in specifica stalla
+  //recupera operai, mansioni quotidiane, mansioni accessorie, ore lavorate (popolameto TABELLA OPERAI STALLA)
   const fetchOperai = async () => {
     if (!idStalla) return;
     try {
@@ -123,31 +147,38 @@ function GestorePagOperai() {
   };
 
 
-  //Calcola percentuale barra di stato nella tabella UI 
+  //Calcola percentuale barra di stato nella TABELLA OPERAI STALLA
   const calcolaPercentuale = (parte, totale) => {
     if (totale === 0) return 0; // se non ha attivita da fare returna 0 
     return Math.round((parte / totale) * 100);
   };
 
+
+
+  // GESTIONE POPUP
+
+
+
   //POPUP ASSEGNA MANSIONE
-  // APERTURA del popup ASSEGNA MANSIONE
+  // APERTURA del popup ASSEGNA MANSIONE interagendo con la TABELLA OPERAI STALLA
   const apriPopupAssegna = (operaio) => {
-    setOperaioSelezionato(operaio); // salva quale operaio 
-    setTestoMansione(''); // pulisce testo mansione
-    setPopupAssegnaVisible(true); // mostra popup
+    setOperaioSelezionato(operaio); // salva quale operaio è stato selezionato 
+    setTestoMansione(''); // reset del testo della mansione (si evita di usare testo vecchio)
+    setPopupAssegnaVisible(true); // rende visibile il popup
   };
+
   // CHIUSURA del popup ASSEGNA MANSIONE
   const chiudiPopupAssegna = () => {
-    setPopupAssegnaVisible(false); // comparsa popup in UI e' condizionata
-    setOperaioSelezionato(null); 
+    setPopupAssegnaVisible(false); // rende non visibile il popup
+    setOperaioSelezionato(null);  // resetta l'operaio selezionato
   };
 
   //POPUP AGGIUNGI OPERAIO
   //APERTURA per il popup AGGIUNGI OPERAIO
   const apriPopupAggiungi = async () => {
-    setPopupAggiungiVisibile(true); //comparsa popup in UI e' condizionata
+    setPopupAggiungiVisibile(true); // rende il popup visibile
     try {
-      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/mucche-in-stalla/${idStalla}`);
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/mucche-in-stalla/${idStalla}`); //recupero id mucca e operaio a cui è associata
       const data = await res.json();
       setMuccheStalla(data); //salva elenco mucche (per tabella mucche da assegnare nel pop-up)
     } catch (err) {
@@ -155,7 +186,8 @@ function GestorePagOperai() {
     }
   };
   //CHIUSURA per il popup AGGIUNGI OPERAIO
-  const chiudiPopupAggiungi = () => {
+  const chiudiPopupAggiungi = () => { 
+    //reset completo dei dati del popup
     setPopupAggiungiVisibile(false);
     setNomeNuovoOperaio('');
     setPswNuovoOperaio('');
@@ -172,16 +204,17 @@ function GestorePagOperai() {
       return;
     }
     try {
-      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/operai-per-popup-modifica/${idStalla}`);
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/operai-per-popup-modifica/${idStalla}`); // recupero id e nome utente degli operai della stalla
       const data = await res.json();
       setListaOperai(data); //salva lista operai
-      setPopupModificaVisibile(true); // attiva popup di modifica
+      setPopupModificaVisibile(true); // rende visibile il popup di modifica
     } catch (err) {
       console.error("Errore caricamento operai:", err);
     }
   };
   //CHIUSURA per il popup MODIFICA OPERAIO
-  const chiudiPopupModifica = () => {
+  const chiudiPopupModifica = () => { 
+    //reset completo dei dati del popup
     setPopupModificaVisibile(false);
     setListaOperai([]);
     setOperaioSelezionato(null);
@@ -197,9 +230,9 @@ function GestorePagOperai() {
       return;
     }
     try { // returna solo operai che NON hanno mucche assegnate
-      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/operai-eliminabili/${idStalla}`);
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/operai-eliminabili/${idStalla}`); //recupero di operai della stalla
       const data = await res.json();
-      setListaOperaiEliminabili(data); //salva lista
+      setListaOperaiEliminabili(data); //salva lista degli operai
       setPopupEliminaVisibile(true); //visualizza popup in UI
     } catch (err) {
       console.error("Errore caricamento operai per eliminazione:", err);
@@ -207,22 +240,24 @@ function GestorePagOperai() {
   };
   //CHIUSURA per il popup ELIMINA OPERAIO
     const chiudiPopupElimina = () => {
+    //reset completo dei dati del popup
     setPopupEliminaVisibile(false);
     setListaOperaiEliminabili([]);
     setOperaioDaEliminare(null);
   };
 
-  //Assegnare MANSIONI ACCESSORIE agli operai
+  // assegnazione delle MANSIONI ACCESSORIE agli operai
   const inviaMansione = async () => {
     if (!testoMansione.trim()) { // se casella di testo e' vuota
       alert('Inserisci un testo valido.');
       return;
     }
     try {
-      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/invia-mansione-accessoria`, {
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/invia-mansione-accessoria`, {  // invio richiesta di aggiunta al server
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          //dati da inviare
           idMittente: idUtente,
           idDestinatario: operaioSelezionato.IdOperaio,
           testo: testoMansione,
@@ -247,10 +282,11 @@ function GestorePagOperai() {
       return;
     }
     try {
-      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/aggiungi-operaio`, {
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/aggiungi-operaio`, { //invio richiesta al server
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          //dati da inviare
           nomeUtente: nomeNuovoOperaio,
           password: pswNuovoOperaio,
           mucche: muccheSelezionate,
@@ -260,8 +296,8 @@ function GestorePagOperai() {
       const data = await res.json(); //legge risposta 
       if (data.success) {
         alert('Operaio aggiunto con successo!');
-        chiudiPopupAggiungi();
-        fetchOperai(); //ricarica l'elenco degli operai
+        chiudiPopupAggiungi(); 
+        fetchOperai(); //ricarica l'elenco degli operai nella TABELLA OPERAI STALLA
       } else {
         alert('Errore: ' + data.message);
       }
@@ -277,10 +313,11 @@ function GestorePagOperai() {
       return;
     }
     try {
-      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/modifica-operaio`, {
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/modifica-operaio`, { // invio richiesta al server
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          // dati da inviare
           idOperaio: operaioSelezionato.ID,
           nuovoNomeUtente: modificaNomeUtente,
           nuovaPassword: modificaPassword
@@ -290,7 +327,7 @@ function GestorePagOperai() {
     if (data.success) {
       alert("Dati modificati con successo");
       chiudiPopupModifica();
-      fetchOperai();
+      fetchOperai(); // ricarica l'elenco degli operai nella TABELLA OPERAI STALLA
     } else {
       alert("Errore modifica: " + data.message);
     }
@@ -306,10 +343,10 @@ function GestorePagOperai() {
       return;
     }
     try {
-      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/elimina-operaio`, {
+      const res = await fetch(`${SERVER_URL}/gestore-pag-operai/elimina-operaio`, { // invio richiesta al server
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idOperaio: operaioDaEliminare })
+        body: JSON.stringify({ idOperaio: operaioDaEliminare }) // dati da inviare
       });
       const data = await res.json(); //converte risposta da json
       if (data.success) {
@@ -330,28 +367,14 @@ function GestorePagOperai() {
   return (
     <div className="gestore-container">
 
-      {/* Barra superiore */}
-      <div className="gestore-top-bar">
-        {/*Sinistra della barra */}
-        <div className="gestore-sinistra">
-          <span><strong>Gestore:</strong> {nomeUtente}</span>
-        </div>
-        {/*Destra della barra */}
-        <div className="gestore-destra">
-          <span className="gestore-ore"><strong>Ore lavorate oggi:</strong> {oreLavoroLive}</span>
-          <button
-            className="gestore-termina-turno"
-            onClick={() => navigate('/TimbraUscita')}> Termina Turno 
-          </button>
-        </div>
+
+      <div>
+        <GestoreBarraSuperiore />
+        {/* Invocazione del componente GestoreBarraSuperiore */}
       </div>
 
-      {/* Navigazione tra le pagine del Gestore */}
-      <div className="gestore-nav">
-        <button onClick={() => navigate('/GestorePagHome')}>Home</button>
-        <button onClick={() => navigate('/GestorePagOperai')}>Operai</button>
-        <button onClick={() => navigate('/GestorePagMucche')}>Mucche</button>
-      </div>
+
+
 
       {/* Tabella Operai Stalla */}
       <h3>Operai Stalla {idStalla ?`[${idStalla}]`: ''}</h3>
@@ -368,17 +391,17 @@ function GestorePagOperai() {
             <th>Assegna Mansione</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody> 
           {operai.map(operaio => (
             <tr key={operaio.IdOperaio}>
               <td>{operaio.NomeUtente}</td>
-
+              
               {operaio.TotaleQuotidiane === 0 ? (
                 <td colSpan="3" style={{ fontStyle: 'italic', fontSize: '13px', textAlign: 'center' }}>
-                  L'operaio non ha nessuna Mansione Quotidiana assegnata.
+                  L'operaio non ha nessuna Mansione Quotidiana assegnata. {/* se non è stata trovata nessua quotidiana per l'operaio */}
                 </td>
               ) : (
-                <>
+                <>{/* Calcolo delle percentuali di completament0 */}
                   <td>
                     <progress
                       value={calcolaPercentuale(operaio.PulizieSvolte, operaio.TotaleQuotidiane)}
@@ -547,7 +570,7 @@ function GestorePagOperai() {
                         onChange={() => {
                           setOperaioSelezionato(op);
                           setModificaNomeUtente(op.NomeUtente);
-                          setModificaPassword(op.Psw || '');
+                          setModificaPassword('');
                         }}
                       />
                     </td>

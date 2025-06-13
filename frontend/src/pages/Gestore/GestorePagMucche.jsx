@@ -1,19 +1,15 @@
-import React, { useEffect, useState , useRef} from 'react';//hook useState = gestire il local state reattivo , useEffect = far girare codice secondario
-import { useNavigate } from 'react-router-dom';//hook per navigare fra le pagine 
+import { useEffect, useState , useRef} from 'react';//useEffect = far girare codice secondario , useState = local state reattivo , useRef = creare riferimento persistente a un valore che non rerenderizza la pagina quando cambia
+import { useNavigate } from 'react-router-dom';//Per navigare fra le pagine 
 import '../../style/GestorePagMucche.css';
 import { SERVER_URL } from '../../config';
-import { calcolaTempoTrascorso } from '../../utils/utilsFrontend';
 
-
+import GestoreBarraSuperiore from './GestoreBarraSuperiore';
 
 function GestorePagMucche() { 
   //Dati Utente
-  const idUtente = localStorage.getItem('idUtente');
-  const nomeUtente = localStorage.getItem('nomeUtente'); // prende da browser
-  const [oraIngresso, setOraIngresso] = useState(null);
+  const [idUtente, setIdUtente] = useState(null);
   //Stati principali della pagina
   const [mucche, setMucche] = useState([]);
-  const [oreLavoro, setOreLavoro] = useState(0);
   const [idStalla, setIdStalla] = useState(null);
   const [posizioneStalla, setPosizioneStalla] = useState('');
   //POPUP
@@ -24,38 +20,49 @@ function GestorePagMucche() {
   //Barra di ricerca
   const [cercaTesto, setCercaTesto] = useState(''); 
   const [parolaEvidenziata, setParolaEvidenziata] = useState('');
-  const righeRef = useRef({}); //Ref React
+  const righeRef = useRef({}); //salvare la ricerca anche se si ricarica la pagina
 
   const navigate = useNavigate(); 
 
-  // Parte al caricamento della pagina , refresha ogni 5 secondi 
+  //-----------------------------------------LOGICA--------------------------------------------------------------------
+
+  //VALIDAZIONE TOKEN
   useEffect(() => {
-    fetchMucche(); //recupera mucche in stalla 
-    const interval = setInterval(() => {fetchMucche();}, 5000);
-    return () => clearInterval(interval); // pulizia all'uscita
-  },[]);
-
-  //Parte al caricamento della pagina , refresha ogni 60 secondi
-    useEffect(() => {
-      fetchOraIngresso(); //recupera ore lavorate da gestore
-      if (!oraIngresso) return;
-      const aggiornaOre = () => {
-        const tempo = calcolaTempoTrascorso(oraIngresso);
-        setOreLavoro(tempo);
-      };
-      aggiornaOre(); // calcolo immediato
-      const timer = setInterval(aggiornaOre, 60000); // ogni minuto
-      return () => clearInterval(timer);
-    }, [oraIngresso]);
-
+  const caricaUtente = async () => {
+    try {
+      const res = await fetch(`${SERVER_URL}/informazioni-utente`, {
+        credentials: 'include'
+      });
+      const data = await res.json();
+      //Controllo : Se token non valido e non e' un gestore redirecta a Accesso
+      if (!data.success || data.utente.Ruolo !== 'gestore') {
+        navigate('/'); 
+      } else {
+        setIdUtente(data.utente.ID); //salva dati utente
+      }
+    } catch (err) {
+      console.error('Errore nel recupero utente', err);
+      navigate('/');
+    }
+  };
+  caricaUtente();
+  }, []);
   
-  //------------------------------------ LOGICA DI GESTOREPAGMUCCHE.JSX -----------------------
-  // Carica tutte le mucche in questa stalla
+  //AGGIORNA LISTA DELLE MUCCHE OGNI 5 SECONDI 
+  useEffect(() => {
+    if (!idUtente) return; // se idUtente non dispo interrompe Effect
+    fetchMucche();  // carica le mucche 
+    const interval = setInterval(() => {fetchMucche();}, 5000); // poi lo fa ogni 5 secondi 
+    return () => clearInterval(interval);
+  }, [idUtente]);
+
+
+  // CARICA TUTTE LE MUCCHE PRESENTI IN QUESTA STALLA
   const fetchMucche = async () => {
     try {
       const res = await fetch(`${SERVER_URL}/gestore-pag-mucche/mucche-in-stalla/${idUtente}`);
-      const data = await res.json(); //carica da json
-      if (!data || !data.idStalla) {
+      const data = await res.json(); 
+      if (!data || !data.idStalla) { 
         throw new Error("Dati mancanti dal backend");
       }
       //salva i dati negli stati 
@@ -68,8 +75,7 @@ function GestorePagMucche() {
     }
   };
 
-  // MODIFICA : 23 mag , qui ho tolto un controllo di risposta server
-  // Carica tutti gli operai che lavorano in questa stalla 
+  // CARICA TUTTI GLI OPERAI CHE LAVORANO IN QUESTA STALLA
   const fetchOperai = async (idStalla) => {
     try {
       const res = await fetch(`${SERVER_URL}/gestore-pag-mucche/operai-in-stalla/${idStalla}`);
@@ -83,18 +89,9 @@ function GestorePagMucche() {
       alert('Errore nel caricamento degli operai. Controlla la console.');
     }
   };
-
-  // Calcola ore lavorate oggi dal gestore
-    const fetchOraIngresso = async () => {
-    try {
-      const res = await fetch(`${SERVER_URL}/gestore-pag-mucche/ore-lavorate/${idUtente}`);
-      const data = await res.json();
-      setOraIngresso(data.oraIngresso || null); // salva orario
-    } catch (err) {
-      console.error('Errore caricamento ora ingresso', err);
-    }
-  };
   
+  //-------------------------------------------POP UP-------------------------------------------------------------------
+
   // APRE I POP-UP
   const apriPopup = async (tipo) => {
     if (idStalla) {
@@ -176,14 +173,14 @@ function GestorePagMucche() {
     }
   };
 
-  //Copia array mucche , ordina tabella Mucche in UI in base agli operai .
+  //COPIA ARRAY MUCCHE E LE ORDINA IN BASE AGLI OPERAI 
   const muccheOrdinate = [...mucche].sort((a, b) => {
     const nomeA = a.NomeOperaio || '';
     const nomeB = b.NomeOperaio || '';
     return nomeA.localeCompare(nomeB);
   });
 
-  // evidenzia parola cercata col finder
+  //EVIDENZIA PAROLA CERCATA COL FINDER
   const evidenzia = (testo) => {
     if (!parolaEvidenziata) return testo;
 
@@ -193,57 +190,43 @@ function GestorePagMucche() {
     const regex = new RegExp(`(${parole.join('|')})`, 'gi');
     return testo.replace(regex, '<mark>$1</mark>');
   };
-
   righeRef.current.found = null; //pulisce riferimento alla precedente riga trovata 
 
 
-  // --------------------- INTERFACCIA UTENTE ----------------------
+  // ------------------------------------- INTERFACCIA UTENTE ---------------------------------------------------------
   return (
-    //BARRA SUPERIORE
     <div className="gestore-container">
-
-      <div className="gestore-top-bar">
-        <div className="gestore-sinistra">
-          <span><strong>Gestore:</strong> {nomeUtente}</span>
-        </div>
-        <div className="gestore-destra">
-          <span><strong> Ore lavorate oggi: </strong> {oreLavoro}</span>
-          <button className="gestore-termina-turno" onClick={() => navigate('/TimbraUscita')}> Termina Turno </button>
-        </div>
-      </div>
-
-      {/* SELETTORE PAGINE (Home/Operai/Mucche) */}
-      <div className="gestore-nav">
-        <button onClick={() => navigate('/GestorePagHome')} className={location.pathname === '/GestorePagHome' ? 'attivo' : ''}> Home </button>
-        <button onClick={() => navigate('/GestorePagOperai')} className={location.pathname === '/GestorePagOperai' ? 'attivo' : ''}> Operai </button>
-        <button onClick={() => navigate('/GestorePagMucche')} className={location.pathname === '/GestorePagMucche' ? 'attivo' : ''}> Mucche </button> 
+        
+      {/*BARRA SUPERIORE*/}
+      <div>
+        <GestoreBarraSuperiore />
       </div>
 
       {/* TABELLA MUCCHE */}
-    <div className="intestazione-tabella">
-      <h3>Mucche presenti nella stalla a: {posizioneStalla}</h3>
-      <div className="campo-ricerca">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault(); // previene il refresh della pagina
-            setParolaEvidenziata(cercaTesto);
-            setTimeout(() => {
-              if (righeRef.current.found) {
-                righeRef.current.found.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                righeRef.current.found = null;
-              }
-            }, 100);
-          }}className="campo-ricerca">
-          <input
-            type="text"
-            placeholder="Cerca in elenco"
-            value={cercaTesto}
-            onChange={(e) => setCercaTesto(e.target.value)}
-          />
-          <button type="submit">Cerca</button>
-        </form>
+      <div className="intestazione-tabella">
+        <h3>Mucche presenti nella stalla a: {posizioneStalla}</h3>
+        <div className="campo-ricerca">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault(); // previene il refresh della pagina
+              setParolaEvidenziata(cercaTesto);
+              setTimeout(() => {
+                if (righeRef.current.found) {
+                  righeRef.current.found.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  righeRef.current.found = null;
+                }
+              }, 100);
+            }}className="campo-ricerca">
+            <input
+              type="text"
+              placeholder="Cerca in elenco"
+              value={cercaTesto}
+              onChange={(e) => setCercaTesto(e.target.value)}
+            />
+            <button type="submit">Cerca</button>
+          </form>
+        </div>
       </div>
-    </div>
     
     <div class="tabella-scroll">
       <table>
