@@ -1,9 +1,13 @@
+//Modulo node che crea automaticamente le Quotidiane per ogni mucca attualmente affidata ad un operaio attivo , una volta al giorno.
+
 const conn = require('../connDb');
 const { getDataOdierna } = require('../utils');
 
 function creaQuotidianeOggi() {
-  const dataOggi = getDataOdierna();
-
+  const dataOggi = getDataOdierna(); //salva Data di oggi
+  
+  //Crea quotidiana per ogni mucca che rispetta questi criteri 
+  //ha idOperaio associato e Operaio non e' disattivato , non ha gia una quotidiana odierna.
   const query = `
     INSERT INTO Quotidiana (idAnimale, idOperaio, Data, Pulizia, Mungitura1, Mungitura2, Alimentazione)
     SELECT a.ID, a.idOperaio, ?, 0, 0, 0, 0
